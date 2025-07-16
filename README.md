@@ -51,7 +51,8 @@ After configuration is complete, you can run the server normally.
            "--mqtt-port", "1883",
            "--mqtt-user", "root",
            "--mqtt-password", "coreflux",
-           "--mqtt-client-id", "claude-coreflux-client"
+           "--mqtt-client-id", "claude-coreflux-client",
+           "--do-agent-api-key", "your_coreflux_copilot_api_key_here"
          ],
          "description": "Coreflux MQTT Broker Control",
          "icon": "🔄",
@@ -60,6 +61,9 @@ After configuration is complete, you can run the server normally.
      }
    }
    ```
+   **Note**: Instead of passing the API key as a command-line argument, you can set it in the `.env` file for better security.
+   
+   **Tip**: A sample `claude_desktop_config.json` file is included in this repository that you can use as a starting point.
 3. Restart Claude Desktop
 
 ### Command-Line Arguments
@@ -77,7 +81,26 @@ The server accepts the following command-line arguments. These settings can also
 | `--mqtt-ca-cert` | Path to CA certificate file | - |
 | `--mqtt-client-cert` | Path to client certificate file | - |
 | `--mqtt-client-key` | Path to client key file | - |
+| `--do-agent-api-key` | Coreflux Copilot API key | - |
 | `--log-level` | Logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL) | INFO |
+
+## Coreflux Copilot API Configuration
+
+The server includes a `request_lot_code` tool that uses the Coreflux Copilot API to generate LOT (Logic Object Tree) code based on natural language prompts. To use this feature, you need to:
+
+1. **Get an API key** from the Coreflux Copilot dashboard
+2. **Set the API key** in your `.env` file:
+   ```bash
+   DO_AGENT_API_KEY=your_coreflux_copilot_api_key_here
+   ```
+3. **Or pass it as a command-line argument**:
+   ```bash
+   python server.py --do-agent-api-key your_api_key_here
+   ```
+
+**Note**: Without the API key, the LOT code generation feature will not work. The setup assistant will prompt you to configure this when you run it.
+
+**API Endpoint**: The server is pre-configured to connect to the Coreflux Copilot API endpoint. The request format conforms to the chat completions API specification with proper authentication headers.
 
 ## Available Tools
 
@@ -96,7 +119,7 @@ The server provides tools for common Coreflux commands:
 - `remove_all_actions`: Remove all actions
 - `remove_all_routes`: Remove all routes
 - `list_discovered_actions`: List all discovered Coreflux actions
-- `request_lot_code`: Generate LOT code based on natural language prompts
+- `request_lot_code`: Generate LOT code using Coreflux Copilot API based on natural language prompts
 
 ## Debugging and Troubleshooting
 

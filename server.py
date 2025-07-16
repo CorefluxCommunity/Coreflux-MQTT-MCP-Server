@@ -80,6 +80,8 @@ def parse_args():
                       help="Path to client certificate file for TLS")
     parser.add_argument("--mqtt-client-key", default=os.environ.get("MQTT_CLIENT_KEY"),
                       help="Path to client key file for TLS")
+    parser.add_argument("--do-agent-api-key", default=os.environ.get("DO_AGENT_API_KEY"),
+                      help="DigitalOcean Agent Platform API key")
     parser.add_argument("--log-level", default=os.environ.get("LOG_LEVEL", "INFO"),
                       choices=["NONE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                       help="Set logging level (NONE disables all logging)")
@@ -620,79 +622,89 @@ async def get_connection_status(ctx: Context) -> str:
 
 @mcp.tool()
 def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
+    """
+    Request LOT code generation from the DigitalOcean Agent Platform API.
+    
+    This function sends a query to the DigitalOcean Agent Platform to generate
+    LOT (Logic Object Tree) code based on the provided query and context.
+    
+    Args:
+        ctx: The MCP context
+        query: The query describing what LOT code to generate
+        context: Optional context to provide additional information
+        
+    Returns:
+        A formatted string containing the generated LOT code and explanation
+    """
     try:
         StringModel(value=query)
         StringModel(value=context)
     except Exception as e:
         return f"ERROR: query/context must be a string: {e}"
-    api_url = "https://anselmo.coreflux.org/webhook/chat_lot_beta"
     
-    # Improved sanitization for JSON safety
-    def sanitize_for_json(text):
-        if not text:
-            return ""
-        # Handle non-string input
-        if not isinstance(text, str):
-            try:
-                return str(text)
-            except Exception as e:
-                logger.warning(f"Failed to convert to string: {e}")
-                return ""
-        
-        # Replace control characters
-        for char in ['\b', '\f', '\n', '\r', '\t']:
-            text = text.replace(char, ' ')
-        
-        # Ensure proper escaping of quotes and backslashes for JSON
-        return text.replace('\\', '\\\\').replace('"', '\\"')
+    # Check if API key is configured
+    api_key = args.do_agent_api_key
+    if not api_key:
+        error_msg = "DigitalOcean Agent Platform API key not configured. Please set DO_AGENT_API_KEY in your .env file or use --do-agent-api-key argument."
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
     
-    # Create a proper JSON-RPC compatible payload
-    sanitized_query = sanitize_for_json(query)
-    sanitized_context = sanitize_for_json(context) if context else ""
+    # DigitalOcean Agent Platform API endpoint
+    api_url = "https://xtov5ljwjkydusw2zpus4yxe.agents.do-ai.run/api/v1/chat/completions"
     
-    # Create payload with proper validation
+    # Create payload for DigitalOcean Agent Platform
+    # The Coreflux Copilot expects a specific chat completion format
     try:
+        # Build the user message content
+        user_content = f"Generate LOT code for the following query: {query}"
+        if context:
+            user_content += f"\n\nContext: {context}"
+        
         payload = {
-            "jsonrpc": "2.0",
-            "id": str(uuid.uuid4()),
-            "method": "lot_code_generation",
-            "params": {
-                "query": sanitized_query,
-                "context": sanitized_context
-            }
+            "messages": [
+                {
+                    "role": "user",
+                    "content": user_content
+                }
+            ],
+            "stream": False,
+            "include_functions_info": False,
+            "include_retrieval_info": False,
+            "include_guardrails_info": False
         }
         
-        # Validate payload is proper JSON before sending
-        payload_json = json.dumps(payload, ensure_ascii=False)
-        # Verify we can parse it back
-        process_json_rpc_message(payload_json)
-        
-        logger.debug(f"Sending JSON-RPC request: {payload_json[:200]}...")
-        logger.info(f"Requesting LOT code generation with query: {sanitized_query[:50]}..." if len(sanitized_query) > 50 else f"Requesting LOT code generation with query: {sanitized_query}")
+        logger.debug(f"Sending request to DO Agent Platform: {json.dumps(payload, ensure_ascii=False)[:200]}...")
+        logger.info(f"Requesting LOT code generation with query: {query[:50]}..." if len(query) > 50 else f"Requesting LOT code generation with query: {query}")
     except Exception as e:
-        error_msg = f"Failed to create valid JSON payload: {str(e)}"
+        error_msg = f"Failed to create payload: {str(e)}"
         logger.error(error_msg)
         return f"Error: {error_msg}"
     
     try:
-        # Set proper Content-Type header to ensure correct JSON interpretation
-        headers = {"Content-Type": "application/json"}
+        # Set proper headers for Coreflux Copilot API
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        
         response = requests.post(api_url, json=payload, headers=headers, timeout=30)
         
         # Debug the raw response
         logger.debug(f"Raw API response status: {response.status_code}")
+        logger.debug(f"Raw API response headers: {dict(response.headers)}")
         logger.debug(f"Raw API response content: {response.text[:200]}..." if len(response.text) > 200 else response.text)
         
         if response.status_code == 200:
-            # Process the response with enhanced error handling
-            result = process_lot_code_response(response.text)
+            # Process the response from Coreflux Copilot
+            result = process_do_agent_response(response.text)
             try:
                 StringModel(value=result)
             except Exception as e:
                 return f"ERROR: Output is not a string: {e}"
             return result
         else:
-            error_msg = f"API request failed with status {response.status_code}"
+            error_msg = f"API request failed with status {response.status_code}: {response.text}"
             logger.error(error_msg)
             return f"Error: {error_msg}"
     except requests.exceptions.Timeout:
@@ -708,9 +720,9 @@ def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
         logger.error(error_msg, exc_info=True)
         return f"Error: {error_msg}"
 
-def process_lot_code_response(response_text):
+def process_do_agent_response(response_text):
     """
-    Process the response from the LOT code generation API with robust JSON handling.
+    Process the response from the DigitalOcean Agent Platform API.
     
     Args:
         response_text: The raw API response text
@@ -727,25 +739,14 @@ def process_lot_code_response(response_text):
     cleaned_text = response_text.strip()
     
     try:
-        # Try to parse the response using the parser module
-        result = process_json_rpc_message(cleaned_text)
+        # Try to parse the response as JSON
+        result = json.loads(cleaned_text)
         
-        # Use schema validation to ensure we have a valid structure
-        if not isinstance(result, dict):
-            error_msg = "Invalid response format: not a JSON object"
-            logger.error(error_msg)
-            logger.debug(f"Response: {cleaned_text[:200]}...")
-            return f"Error: {error_msg}"
-            
-        # Extract the result from JSON-RPC style response if needed
-        if "result" in result:
-            result = result["result"]
-            
         # Log success
         logger.info(f"LOT code generation successful")
         
         # Format the response for output
-        formatted_result = format_lot_code_output(result)
+        formatted_result = format_do_agent_output(result)
         try:
             StringModel(value=formatted_result)
         except Exception as e:
@@ -753,30 +754,35 @@ def process_lot_code_response(response_text):
         return formatted_result
         
     except json.JSONDecodeError as e:
-        # Log the detailed error
-        error_msg = f"Failed to parse API response: {str(e)}"
-        logger.error(error_msg)
-        logger.debug(f"JSON parse error details: {str(e)}, line: {e.lineno}, col: {e.colno}, pos: {e.pos}")
-        logger.debug(f"Problematic response: {cleaned_text[:500]}...")
+        # If it's not JSON, treat it as plain text response
+        logger.info(f"Received plain text response from DO Agent Platform")
+        # Return the raw text as is
+        return cleaned_text
         
-        # Return a user-friendly error message
-        return f"Error: Failed to parse the API response. The service may be experiencing issues."
     except Exception as e:
         error_msg = f"Error processing API response: {str(e)}"
         logger.error(error_msg)
         logger.debug(f"Problematic response: {cleaned_text[:500]}...")
         return f"Error: {error_msg}"
 
-def format_lot_code_output(result):
+def format_do_agent_output(result):
     """
-    Format the LOT code generation result for better readability.
+    Format the DigitalOcean Agent Platform response for better readability.
     
     Args:
-        result: The parsed result object
+        result: The parsed result object from the chat completion API
         
     Returns:
         A formatted string with the processed result
     """
+    # If it's a string, return it directly
+    if isinstance(result, str):
+        return result
+    
+    # If it's not a dict, convert to string
+    if not isinstance(result, dict):
+        return str(result)
+    
     # Initialize output array
     output = []
     
@@ -788,23 +794,54 @@ def format_lot_code_output(result):
             return value if value is not None else default
         return default
     
-    # Add title if present
-    title = safe_get(result, "title")
-    if title:
-        output.append(f"# {title}")
-        output.append("")
+    # Handle chat completion response format
+    # Look for 'choices' array (standard OpenAI-style chat completion format)
+    choices = safe_get(result, "choices")
+    if choices and isinstance(choices, list) and len(choices) > 0:
+        # Get the first choice
+        choice = choices[0]
+        if isinstance(choice, dict):
+            # Extract the message content
+            message = safe_get(choice, "message")
+            if isinstance(message, dict):
+                content = safe_get(message, "content")
+                if content:
+                    output.append(content)
+                    output.append("")
     
-    # Add description if present
-    description = safe_get(result, "description")
-    if description:
-        output.append(description)
-        output.append("")
+    # If no choices found, check for other common response fields
+    if not output:
+        # Check for 'response' field (common in agent platforms)
+        response_content = safe_get(result, "response")
+        if response_content:
+            output.append(response_content)
+            output.append("")
+        
+        # Check for 'message' field
+        message = safe_get(result, "message")
+        if message and message != response_content:
+            output.append(message)
+            output.append("")
+        
+        # Check for 'content' field
+        content = safe_get(result, "content")
+        if content and content != response_content and content != message:
+            output.append(content)
+            output.append("")
     
-    # Add LOT code if present
+    # Check for 'lot_code' field specifically
     lot_code = safe_get(result, "lot_code")
     if lot_code:
-        output.append("```")
+        output.append("```lot")
         output.append(lot_code)
+        output.append("```")
+        output.append("")
+    
+    # Check for 'code' field
+    code = safe_get(result, "code")
+    if code and code != lot_code:
+        output.append("```")
+        output.append(code)
         output.append("```")
         output.append("")
     
@@ -813,13 +850,21 @@ def format_lot_code_output(result):
     if explanation:
         output.append("## Explanation")
         output.append(explanation)
+        output.append("")
+    
+    # Add description if present
+    description = safe_get(result, "description")
+    if description and description != explanation:
+        output.append("## Description")
+        output.append(description)
+        output.append("")
     
     # If we didn't recognize any fields, return the raw object as string
     if not output:
-        return f"Received response: {json.dumps(result, indent=2)}"
+        return json.dumps(result, indent=2)
         
     # Join all parts with newlines and return
-    return "\n".join(output)
+    return "\n".join(output).strip()
 
 # endregion
 

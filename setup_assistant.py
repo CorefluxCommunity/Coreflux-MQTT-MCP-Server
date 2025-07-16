@@ -106,6 +106,20 @@ def run_setup_assistant():
         client_key = input(f"Path to Client Key [{ env_vars.get('MQTT_CLIENT_KEY', '') }]: ").strip()
         env_vars["MQTT_CLIENT_KEY"] = client_key if client_key else env_vars.get("MQTT_CLIENT_KEY", "")
     
+    # DigitalOcean Agent Platform API Configuration
+    print("\n" + "-"*50)
+    print("DigitalOcean Agent Platform API Configuration")
+    print("This is required for the LOT code generation feature.")
+    print("You can get your API key from the DigitalOcean Agent Platform dashboard.")
+    print("-"*50)
+    
+    do_api_key = input(f"DigitalOcean Agent Platform API Key [{ env_vars.get('DO_AGENT_API_KEY', '') }]: ").strip()
+    env_vars["DO_AGENT_API_KEY"] = do_api_key if do_api_key else env_vars.get("DO_AGENT_API_KEY", "")
+    
+    if not env_vars["DO_AGENT_API_KEY"]:
+        print("WARNING: No API key provided. The LOT code generation feature will not work.")
+        print("You can add the API key later by editing the .env file.")
+    
     # Logging Configuration
     log_level = input(f"Log Level (NONE/DEBUG/INFO/WARNING/ERROR/CRITICAL) [{ env_vars.get('LOG_LEVEL', 'INFO') }]: ").strip().upper()
     valid_log_levels = ["NONE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -134,7 +148,13 @@ def run_setup_assistant():
         if env_vars["MQTT_USE_TLS"] == "true":
             f.write(f"MQTT_CA_CERT={env_vars['MQTT_CA_CERT']}\n")
             f.write(f"MQTT_CLIENT_CERT={env_vars['MQTT_CLIENT_CERT']}\n")
-            f.write(f"MQTT_CLIENT_KEY={env_vars['MQTT_CLIENT_KEY']}\n\n")
+            f.write(f"MQTT_CLIENT_KEY={env_vars['MQTT_CLIENT_KEY']}\n")
+        f.write("\n")
+        
+        # DigitalOcean Agent Platform API Configuration
+        f.write("# DigitalOcean Agent Platform API Configuration\n")
+        f.write("# Get your API key from DigitalOcean Agent Platform dashboard\n")
+        f.write(f"DO_AGENT_API_KEY={env_vars['DO_AGENT_API_KEY']}\n\n")
         
         # Logging Configuration
         f.write("# Logging Configuration\n")

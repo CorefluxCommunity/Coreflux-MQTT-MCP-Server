@@ -12,7 +12,9 @@
       ],
       "description": "Coreflux MQTT Broker Control",
       "icon": "🔄",
-      "env": {}
+      "env": {
+        "DO_AGENT_API_KEY": "your_coreflux_copilot_api_key_here"
+      }
     }
   }
 } 
