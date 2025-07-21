@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 import time
+import threading
 from datetime import datetime
 from dotenv import load_dotenv
 from parser import process_json_rpc_message
@@ -323,6 +324,11 @@ def setup_mqtt(args):
             
             if missing_files:
                 logger.error(f"Missing certificate files: {', '.join(missing_files)}")
+                logger.warning("TLS configuration incomplete. MQTT client created but not connected.")
+                # Set callbacks but don't attempt connection
+                mqtt_client.on_connect = on_connect
+                mqtt_client.on_message = on_message
+                mqtt_client.on_disconnect = on_disconnect
                 return False
                 
             mqtt_client.tls_set(
@@ -337,8 +343,8 @@ def setup_mqtt(args):
         mqtt_client.on_message = on_message
         mqtt_client.on_disconnect = on_disconnect
         
-        # Connect to broker
-        logger.info(f"Connecting to MQTT broker at {args.mqtt_host}:{args.mqtt_port} with client ID: {args.mqtt_client_id}")
+        # Attempt to connect to broker
+        logger.info(f"Attempting to connect to MQTT broker at {args.mqtt_host}:{args.mqtt_port} with client ID: {args.mqtt_client_id}")
         connection_status["last_connection_attempt"] = datetime.now()
         
         # Set a connection timeout
@@ -355,29 +361,29 @@ def setup_mqtt(args):
                 time.sleep(0.5)
             
             # If we get here, we didn't connect within the timeout
-            logger.warning(f"MQTT connection not confirmed after {max_wait} seconds, but loop started")
-            return True
+            logger.warning(f"MQTT connection not confirmed after {max_wait} seconds, but client initialized")
+            logger.info("Use mqtt_connect tool or check_broker_health to retry connection")
+            return False
             
-        except Exception as e:
-            logger.error(f"MQTT protocol error: {str(e)}")
+        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+            logger.warning(f"Failed to connect to MQTT broker: {str(e)}")
             connection_status["last_error"] = str(e)
+            logger.info("MQTT client initialized but not connected. Use mqtt_connect tool to retry.")
             return False
-        except ConnectionRefusedError:
-            logger.error(f"Connection refused by broker at {args.mqtt_host}:{args.mqtt_port}")
-            connection_status["last_error"] = "Connection refused by broker"
-            return False
-        except TimeoutError:
-            logger.error(f"Connection timed out when connecting to {args.mqtt_host}:{args.mqtt_port}")
-            connection_status["last_error"] = "Connection timed out"
+        except Exception as e:
+            logger.warning(f"MQTT connection error: {str(e)}")
+            connection_status["last_error"] = str(e)
+            logger.info("MQTT client initialized but not connected. Use mqtt_connect tool to retry.")
             return False
             
     except Exception as e:
-        logger.error(f"Error setting up MQTT client: {str(e)}", exc_info=True)
+        logger.error(f"Error creating MQTT client: {str(e)}", exc_info=True)
         connection_status["last_error"] = str(e)
+        logger.warning("MQTT client creation failed. Some tools may not work until connection is established.")
         return False
 
 # Helper function to execute Coreflux commands
-def execute_command(command_string):
+def execute_command(command_string, timeout=10.0):
     if not mqtt_client:
         error_msg = "MQTT client not initialized"
         logger.error(error_msg)
@@ -388,18 +394,79 @@ def execute_command(command_string):
         logger.error(error_msg)
         return f"ERROR: {error_msg}"
         
+    # Event to signal when we receive a response
+    response_event = threading.Event()
+    response_data = {"payload": None, "error": None}
+    
+    # Callback for command output messages
+    def on_command_output(client, userdata, msg):
+        try:
+            payload = msg.payload.decode('utf-8')
+            response_data["payload"] = payload
+            logger.debug(f"Received command output: {payload}")
+        except UnicodeDecodeError:
+            response_data["payload"] = str(msg.payload)
+        except Exception as e:
+            response_data["error"] = f"Error processing command output: {str(e)}"
+        response_event.set()
+    
     try:
-        result = mqtt_client.publish("$SYS/Coreflux/Command", command_string)
-        if result.rc == mqtt.MQTT_ERR_SUCCESS:
-            logger.info(f"Published command: {command_string}")
-            return f"Command published successfully: {command_string}"
-        else:
-            error_msg = f"Failed to publish command: {mqtt.error_string(result.rc)}"
+        # Subscribe to command output topic
+        output_topic = "$SYS/Coreflux/Command/Output"
+        mqtt_client.message_callback_add(output_topic, on_command_output)
+        
+        subscribe_result, mid = mqtt_client.subscribe(output_topic, 0)
+        if subscribe_result != mqtt.MQTT_ERR_SUCCESS:
+            error_msg = f"Failed to subscribe to command output: {mqtt.error_string(subscribe_result)}"
             logger.error(error_msg)
             return f"ERROR: {error_msg}"
+        
+        logger.debug(f"Subscribed to {output_topic} for command feedback")
+        
+        # Small delay to ensure subscription is established
+        time.sleep(0.1)
+        
+        # Publish the command
+        publish_result = mqtt_client.publish("$SYS/Coreflux/Command", command_string)
+        if publish_result.rc != mqtt.MQTT_ERR_SUCCESS:
+            error_msg = f"Failed to publish command: {mqtt.error_string(publish_result.rc)}"
+            logger.error(error_msg)
+            # Clean up subscription
+            mqtt_client.unsubscribe(output_topic)
+            mqtt_client.message_callback_remove(output_topic)
+            return f"ERROR: {error_msg}"
+        
+        logger.info(f"Published command: {command_string}")
+        
+        # Wait for response or timeout
+        if response_event.wait(timeout):
+            # Response received
+            if response_data["error"]:
+                logger.error(response_data["error"])
+                response = f"ERROR: {response_data['error']}"
+            else:
+                response = response_data["payload"] or "Command executed (no output)"
+                logger.info(f"Command completed successfully")
+        else:
+            # Timeout
+            logger.warning(f"Command response timeout after {timeout} seconds")
+            response = f"WARNING: Command sent but no response received within {timeout} seconds"
+        
+        # Clean up subscription
+        mqtt_client.unsubscribe(output_topic)
+        mqtt_client.message_callback_remove(output_topic)
+        
+        return response
+        
     except Exception as e:
         error_msg = f"MQTT protocol error while executing command: {str(e)}"
         logger.error(error_msg)
+        # Attempt cleanup
+        try:
+            mqtt_client.unsubscribe(output_topic)
+            mqtt_client.message_callback_remove(output_topic)
+        except:
+            pass
         return f"ERROR: {error_msg}"
 
 # region COREFLUX TOOLS
@@ -603,16 +670,36 @@ async def list_discovered_actions(ctx: Context) -> str:
 
 @mcp.tool()
 async def get_connection_status(ctx: Context) -> str:
-    """Get the current MQTT connection status"""
+    """Get the current MQTT connection status and guidance for troubleshooting"""
     status = {
         "connected": connection_status["connected"],
         "last_connection_attempt": str(connection_status["last_connection_attempt"]) if connection_status["last_connection_attempt"] else None,
         "reconnect_count": connection_status["reconnect_count"],
         "last_error": connection_status["last_error"],
         "discovered_actions": len(discovered_actions),
-        "registered_tools": len(registered_dynamic_tools)
+        "registered_tools": len(registered_dynamic_tools),
+        "mqtt_client_initialized": mqtt_client is not None
     }
-    logger.info(f"Connection status requested: {status}")
+    
+    # Add troubleshooting guidance
+    guidance = []
+    if not mqtt_client:
+        guidance.append("❌ MQTT client not initialized. This indicates a serious configuration issue.")
+        guidance.append("💡 Try running setup_assistant.py to configure your connection.")
+    elif not connection_status["connected"]:
+        guidance.append("⚠️ MQTT client initialized but not connected.")
+        guidance.append("💡 Use mqtt_connect tool to establish connection.")
+        guidance.append("💡 Use check_broker_health tool to test and reconnect.")
+        if connection_status["last_error"]:
+            guidance.append(f"🔍 Last error: {connection_status['last_error']}")
+    else:
+        guidance.append("✅ MQTT connection is healthy and active.")
+        if len(discovered_actions) == 0:
+            guidance.append("ℹ️ No Coreflux actions discovered yet. This may be normal for new connections.")
+    
+    status["troubleshooting_guidance"] = guidance
+    
+    logger.info(f"Connection status requested: connected={status['connected']}, client_initialized={status['mqtt_client_initialized']}")
     result = json.dumps(status, indent=2)
     try:
         StringModel(value=result)
@@ -669,7 +756,7 @@ def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
             ],
             "stream": False,
             "include_functions_info": False,
-            "include_retrieval_info": False,
+            "include_retrieval_info": True,
             "include_guardrails_info": False
         }
         
@@ -986,6 +1073,58 @@ class MqttMessageModel(BaseModel):
         except Exception:
             raise ValueError("message must be a valid JSON string")
         return v
+
+@mcp.tool()
+async def setup_mqtt_connection(broker: str, port: int = 1883, username: str = None, password: str = None, 
+                               client_id: str = None, use_tls: bool = False, ctx: Context = None) -> str:
+    """
+    Setup and initialize a new MQTT connection with custom parameters.
+    This is useful when the server started without a valid MQTT connection.
+    
+    Args:
+        broker: The MQTT broker hostname or IP address
+        port: The MQTT broker port (default: 1883)
+        username: Optional username for authentication
+        password: Optional password for authentication
+        client_id: Optional client ID (default: auto-generated)
+        use_tls: Whether to use TLS encryption (default: False)
+        
+    Returns:
+        A string indicating success or failure of the setup
+    """
+    global mqtt_client, args
+    
+    # Generate client ID if not provided
+    if not client_id:
+        client_id = f"coreflux-mcp-{uuid.uuid4().hex[:8]}"
+    
+    # Update global args object with new settings
+    args.mqtt_host = broker
+    args.mqtt_port = port
+    args.mqtt_user = username
+    args.mqtt_password = password
+    args.mqtt_client_id = client_id
+    args.mqtt_use_tls = use_tls
+    
+    # Disconnect existing client if present
+    if mqtt_client:
+        try:
+            if connection_status["connected"]:
+                mqtt_client.disconnect()
+            mqtt_client.loop_stop()
+            mqtt_client = None
+            logger.info("Disconnected from previous MQTT broker")
+        except Exception as e:
+            logger.warning(f"Error disconnecting from previous broker: {e}")
+    
+    # Setup new connection
+    logger.info(f"Setting up new MQTT connection to {broker}:{port}")
+    setup_result = setup_mqtt(args)
+    
+    if setup_result:
+        return f"Successfully set up and connected to MQTT broker at {broker}:{port}"
+    else:
+        return f"MQTT client configured for {broker}:{port} but connection failed. Use check_broker_health to retry."
 
 @mcp.tool()
 async def reconnect_mqtt(ctx: Context) -> str:
@@ -1445,17 +1584,17 @@ if __name__ == "__main__":
         # Parse command-line arguments
         args = parse_args()
         
-        # Initialize MQTT connection
-        if not setup_mqtt(args):
-            logger.error("Failed to initialize MQTT connection. Exiting.")
-            logger.error("Failed to initialize MQTT connection. Run setup_assistant.py to configure your connection.")
-            sys.exit(1)
+        # Attempt to initialize MQTT connection (non-blocking)
+        mqtt_setup_result = setup_mqtt(args)
+        if mqtt_setup_result:
+            logger.info(f"Server started with client ID: {args.mqtt_client_id}")
+            logger.info(f"Connected to MQTT broker at: {args.mqtt_host}:{args.mqtt_port}")
+        else:
+            logger.warning("Failed to initialize MQTT connection on startup.")
+            logger.info("MCP server will start anyway. Use mqtt_connect tool to establish connection later.")
+            logger.info("You can also run setup_assistant.py to configure your connection.")
         
-        # Log startup information
-        logger.info(f"Server started with client ID: {args.mqtt_client_id}")
-        logger.info(f"Connected to MQTT broker at: {args.mqtt_host}:{args.mqtt_port}")
-        
-        # Run with standard transport
+        # Run with standard transport (regardless of MQTT connection status)
         logger.info("Starting FastMCP server")
         mcp.run()
     except KeyboardInterrupt:

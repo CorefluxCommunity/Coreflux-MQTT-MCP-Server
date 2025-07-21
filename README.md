@@ -123,6 +123,25 @@ The server provides tools for common Coreflux commands:
 
 ## Debugging and Troubleshooting
 
+The MCP server now starts even if the MQTT broker is not available, allowing you to troubleshoot and configure connections through the MCP tools.
+
+### Connection Status and Recovery
+
+- The server will start successfully even if the MQTT broker is unreachable
+- Use the `get_connection_status` tool to check connection health and get troubleshooting guidance
+- Use the `setup_mqtt_connection` tool to configure a new broker connection without restarting
+- Use the `check_broker_health` or `reconnect_mqtt` tools to test and retry connections
+
+### Available Tools for Connection Management
+
+- `get_connection_status`: Get detailed connection status with troubleshooting guidance
+- `setup_mqtt_connection`: Configure a new MQTT broker connection dynamically
+- `mqtt_connect`: Connect to a specific MQTT broker with custom parameters
+- `check_broker_health`: Test broker connectivity and attempt reconnection
+- `reconnect_mqtt`: Force reconnection to the configured broker
+
+### Traditional Troubleshooting Steps
+
 If you encounter issues:
 
 1. Verify your MQTT broker credentials in your Claude configuration
