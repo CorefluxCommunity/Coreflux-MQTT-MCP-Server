@@ -1397,7 +1397,7 @@ async def mqtt_read_messages(topic: Optional[str] = None, max_messages: int = 10
     
     Args:
         topic: The specific topic to read from (None for all topics)
-        max_messages: Maximum number of messages to return per topic
+        max_messages: Maximum number of messages to return per topic (max 100)
         clear_buffer: Whether to clear the message buffer after reading
         
     Returns:
@@ -1409,6 +1409,10 @@ async def mqtt_read_messages(topic: Optional[str] = None, max_messages: int = 10
         return f"ERROR: {error_msg}"
     
     try:
+        # Record start time to prevent hanging
+        start_time = time.time()
+        timeout_seconds = 10  # 10 second timeout
+        
         if not mqtt_message_buffer:
             logger.info("No messages in buffer")
             return "No messages have been received yet."
@@ -1416,21 +1420,43 @@ async def mqtt_read_messages(topic: Optional[str] = None, max_messages: int = 10
         # Filter by topic if provided
         topics_to_read = [topic] if topic else list(mqtt_message_buffer.keys())
         
+        # Limit the number of topics to process to prevent blocking
+        if len(topics_to_read) > 10:
+            topics_to_read = topics_to_read[:10]
+            logger.warning(f"Limited to processing first 10 topics out of {len(mqtt_message_buffer)} available")
+        
         # Build result
         result = []
         
         for t in topics_to_read:
+            # Check for timeout
+            if time.time() - start_time > timeout_seconds:
+                logger.warning(f"mqtt_read_messages timed out after {timeout_seconds} seconds")
+                result.append(f"⚠️ Operation timed out - showing partial results")
+                break
+                
             if t in mqtt_message_buffer:
-                messages = mqtt_message_buffer[t][-max_messages:] if max_messages > 0 else mqtt_message_buffer[t]
+                # Ensure max_messages is positive and reasonable
+                safe_max_messages = max(1, min(max_messages, 100)) if max_messages > 0 else 10
+                messages = mqtt_message_buffer[t][-safe_max_messages:]
                 
                 # Format messages for this topic
                 result.append(f"Topic: {t}")
-                result.append(f"Messages: {len(messages)}")
+                result.append(f"Messages: {len(messages)} (showing last {len(messages)})")
                 result.append("-" * 40)
                 
                 for idx, msg in enumerate(messages):
+                    # Check for timeout in inner loop too
+                    if time.time() - start_time > timeout_seconds:
+                        result.append(f"⚠️ Timeout reached - partial message list")
+                        break
+                        
                     result.append(f"Message {idx+1}:")
-                    result.append(f"  Payload: {msg['payload']}")
+                    # Truncate very long payloads to prevent blocking
+                    payload = str(msg['payload'])
+                    if len(payload) > 500:
+                        payload = payload[:500] + "... (truncated)"
+                    result.append(f"  Payload: {payload}")
                     result.append(f"  Timestamp: {datetime.fromtimestamp(msg['timestamp']).isoformat()}")
                     result.append(f"  QoS: {msg['qos']}")
                     result.append(f"  Retain: {msg['retain']}")
