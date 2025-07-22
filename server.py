@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+"""
+Coreflux MQTT MCP Server
+
+A Model Context Protocol (MCP) server that provides integration between Claude and Coreflux MQTT broker.
+Supports dynamic action discovery, LOT code generation, and comprehensive MQTT operations.
+
+SECURITY NOTE: This server implements comprehensive log sanitization to prevent sensitive information
+(passwords, API keys, certificates, file paths) from being exposed in log files. All logging
+functions use automatic sanitization via the safe_log() function and SENSITIVE_PATTERNS.
+
+See SECURITY_LOGGING.md for detailed documentation on log sanitization features.
+"""
+
 from mcp.server.fastmcp import FastMCP, Context
 import os
 import paho.mqtt.client as mqtt
@@ -15,10 +29,164 @@ from parser import process_json_rpc_message
 from typing import Optional
 import pydantic
 from pydantic import BaseModel, validator
+import re
 
 # Define a custom NONE logging level (higher than CRITICAL)
 NONE_LEVEL = 100  # Higher than CRITICAL (50)
 logging.addLevelName(NONE_LEVEL, "NONE")
+
+# Log sanitization patterns
+SENSITIVE_PATTERNS = [
+    # API Keys and tokens (more comprehensive)
+    (r'Bearer\s+[A-Za-z0-9\-._~+/]+=*', 'Bearer [REDACTED]'),
+    (r'api[_-]?key["\']?\s*[:=]\s*["\']?[A-Za-z0-9\-._~+/]{8,}["\']?', 'api_key: [REDACTED]'),
+    (r'token["\']?\s*[:=]\s*["\']?[A-Za-z0-9\-._~+/]{8,}["\']?', 'token: [REDACTED]'),
+    (r'secret["\']?\s*[:=]\s*["\']?[A-Za-z0-9\-._~+/]{8,}["\']?', 'secret: [REDACTED]'),
+    (r'authorization["\']?\s*[:=]\s*["\']?[A-Za-z0-9\-._~+/]{8,}["\']?', 'authorization: [REDACTED]'),
+    
+    # Passwords (more patterns)
+    (r'password["\']?\s*[:=]\s*["\']?[^"\'\s]{3,}["\']?', 'password: [REDACTED]'),
+    (r'passwd["\']?\s*[:=]\s*["\']?[^"\'\s]{3,}["\']?', 'passwd: [REDACTED]'),
+    (r'pwd["\']?\s*[:=]\s*["\']?[^"\'\s]{3,}["\']?', 'pwd: [REDACTED]'),
+    (r'pass["\']?\s*[:=]\s*["\']?[^"\'\s]{3,}["\']?', 'pass: [REDACTED]'),
+    
+    # File paths (more comprehensive)
+    (r'[C-Z]:\\[^"\'\s]*(?:key|cert|crt|pem|p12|pfx)[^"\'\s]*', '[CERT_PATH_REDACTED]'),
+    (r'[C-Z]:\\Users\\[^\\]+\\[^"\'\s]*', '[USER_PATH_REDACTED]'),
+    (r'[C-Z]:\\[^"\'\s]+', '[PATH_REDACTED]'),
+    (r'/(?:home|root|usr|opt|etc|var)/[^"\'\s]*(?:key|cert|crt|pem|p12|pfx)[^"\'\s]*', '[CERT_PATH_REDACTED]'),
+    (r'/(?:home|root)/[^/]+/[^"\'\s]*', '[USER_PATH_REDACTED]'),
+    (r'/(?:home|root|usr|opt|etc|var)/[^"\'\s]+', '[PATH_REDACTED]'),
+    
+    # URLs with credentials
+    (r'https?://[^:\s]+:[^@\s]+@[^/\s]+', 'https://[USER]:[PASS]@[HOST]'),
+    (r'ftp://[^:\s]+:[^@\s]+@[^/\s]+', 'ftp://[USER]:[PASS]@[HOST]'),
+    
+    # Connection strings
+    (r'mongodb://[^:\s]+:[^@\s]+@[^/\s]+', 'mongodb://[USER]:[PASS]@[HOST]'),
+    (r'mysql://[^:\s]+:[^@\s]+@[^/\s]+', 'mysql://[USER]:[PASS]@[HOST]'),
+    (r'postgresql://[^:\s]+:[^@\s]+@[^/\s]+', 'postgresql://[USER]:[PASS]@[HOST]'),
+    
+    # Certificate content
+    (r'-----BEGIN[^-]+-----[^-]+-----END[^-]+-----', '[CERTIFICATE_REDACTED]'),
+    
+    # MQTT message content that might contain sensitive data
+    (r'"payload":\s*"[^"]{100,}"', '"payload": "[PAYLOAD_REDACTED]"'),
+    
+    # Long hex strings (likely keys/hashes)
+    (r'\b[A-Fa-f0-9]{32,}\b', '[HEX_REDACTED]'),
+    
+    # JWT tokens
+    (r'eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*', '[JWT_REDACTED]'),
+    
+    # Base64 encoded data (likely sensitive if > 32 chars)
+    (r'[A-Za-z0-9+/]{32,}={0,2}', '[BASE64_REDACTED]'),
+]
+
+def sanitize_log_message(message: str) -> str:
+    """
+    Sanitize log messages to remove sensitive information.
+    
+    Args:
+        message: The original log message
+        
+    Returns:
+        Sanitized log message with sensitive data redacted
+    """
+    if not isinstance(message, str):
+        message = str(message)
+    
+    sanitized = message
+    for pattern, replacement in SENSITIVE_PATTERNS:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    
+    return sanitized
+
+def safe_log(logger_func, message: str, *args, **kwargs):
+    """
+    Safely log a message with automatic sanitization.
+    
+    Args:
+        logger_func: The logger function (logger.info, logger.error, etc.)
+        message: The message to log
+        *args: Additional arguments for the logger
+        **kwargs: Additional keyword arguments for the logger
+    """
+    try:
+        sanitized_message = sanitize_log_message(message)
+        logger_func(sanitized_message, *args, **kwargs)
+    except Exception as e:
+        # Fallback to basic logging if sanitization fails
+        try:
+            logger_func(f"[LOG_SANITIZATION_ERROR] Original message redacted due to sanitization error: {str(e)}")
+        except:
+            pass  # Give up if even basic logging fails
+
+def sanitize_function_args(**kwargs) -> dict:
+    """
+    Sanitize function arguments for logging purposes.
+    
+    Args:
+        **kwargs: Function arguments to sanitize
+        
+    Returns:
+        Dictionary with sanitized argument values
+    """
+    sanitized = {}
+    sensitive_keys = ['password', 'api_key', 'token', 'secret', 'key', 'cert', 'authorization']
+    
+    for key, value in kwargs.items():
+        key_lower = key.lower()
+        if any(sensitive in key_lower for sensitive in sensitive_keys):
+            sanitized[key] = '[REDACTED]' if value else None
+        elif isinstance(value, str) and len(value) > 100:
+            # Truncate very long strings and sanitize
+            sanitized[key] = sanitize_log_message(value[:100] + '...')
+        elif isinstance(value, str):
+            sanitized[key] = sanitize_log_message(value)
+        else:
+            sanitized[key] = value
+    
+    return sanitized
+
+def log_function_call(func_name: str, **kwargs):
+    """
+    Safely log a function call with sanitized arguments.
+    
+    Args:
+        func_name: Name of the function being called
+        **kwargs: Function arguments to log
+    """
+    sanitized_args = sanitize_function_args(**kwargs)
+    safe_log(logger.debug, f"Function {func_name} called with args: {sanitized_args}")
+
+def is_potentially_sensitive(value: str) -> bool:
+    """
+    Check if a string value might contain sensitive information.
+    
+    Args:
+        value: String to check
+        
+    Returns:
+        True if the value might be sensitive
+    """
+    if not isinstance(value, str) or len(value) < 8:
+        return False
+    
+    # Check for patterns that might indicate sensitive data
+    sensitive_indicators = [
+        r'[A-Za-z0-9]{32,}',  # Long alphanumeric strings (likely keys)
+        r'Bearer\s+',         # Bearer tokens
+        r'-----BEGIN',        # Certificate start
+        r'[A-Za-z0-9+/]{20,}={0,2}',  # Base64 data
+        r'eyJ[A-Za-z0-9]',    # JWT tokens
+    ]
+    
+    for pattern in sensitive_indicators:
+        if re.search(pattern, value):
+            return True
+    
+    return False
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -183,7 +351,7 @@ def on_message(client, userdata, msg):
             
             # Log the raw data for debugging
             payload_raw = msg.payload
-            logger.debug(f"Raw message received: {repr(payload_raw)}")
+            safe_log(logger.debug, f"Raw message received: {repr(payload_raw)}")
             
             try:
                 # Safe decoding of the payload
@@ -249,7 +417,7 @@ def extract_description_safely(payload_str):
     
     except Exception as e:
         logger.warning(f"JSON parse error: {str(e)}")
-        logger.debug(f"Problematic payload: {payload_str}")
+        safe_log(logger.debug, f"Problematic payload: {payload_str}")
         
         # Return the payload as-is since we couldn't parse it
         return payload_str
@@ -306,7 +474,7 @@ def setup_mqtt(args):
         # Set up authentication if provided
         if args.mqtt_user and args.mqtt_password:
             mqtt_client.username_pw_set(args.mqtt_user, args.mqtt_password)
-            logger.debug(f"Using MQTT authentication with username: {args.mqtt_user}")
+            safe_log(logger.debug, f"Using MQTT authentication with username: {args.mqtt_user}")
         
         # Configure TLS if enabled
         if args.mqtt_use_tls:
@@ -323,7 +491,7 @@ def setup_mqtt(args):
                     missing_files.append(f"{cert_name} at {cert_path}")
             
             if missing_files:
-                logger.error(f"Missing certificate files: {', '.join(missing_files)}")
+                safe_log(logger.error, f"Missing certificate files: {', '.join(missing_files)}")
                 logger.warning("TLS configuration incomplete. MQTT client created but not connected.")
                 # Set callbacks but don't attempt connection
                 mqtt_client.on_connect = on_connect
@@ -344,7 +512,7 @@ def setup_mqtt(args):
         mqtt_client.on_disconnect = on_disconnect
         
         # Attempt to connect to broker
-        logger.info(f"Attempting to connect to MQTT broker at {args.mqtt_host}:{args.mqtt_port} with client ID: {args.mqtt_client_id}")
+        safe_log(logger.info, f"Attempting to connect to MQTT broker at {args.mqtt_host}:{args.mqtt_port} with client ID: {args.mqtt_client_id}")
         connection_status["last_connection_attempt"] = datetime.now()
         
         # Set a connection timeout
@@ -436,7 +604,7 @@ def execute_command(command_string, timeout=10.0):
             mqtt_client.message_callback_remove(output_topic)
             return f"ERROR: {error_msg}"
         
-        logger.info(f"Published command: {command_string}")
+        safe_log(logger.info, f"Published command: {sanitize_log_message(command_string)}")
         
         # Wait for response or timeout
         if response_event.wait(timeout):
@@ -485,7 +653,7 @@ async def add_rule(rule_definition: str, ctx: Context) -> str:
         StringModel(value=rule_definition)
     except Exception as e:
         return f"ERROR: rule_definition must be a string: {e}"
-    logger.info(f"Adding rule: {rule_definition[:50]}..." if len(rule_definition) > 50 else f"Adding rule: {rule_definition}")
+    safe_log(logger.info, f"Adding rule: {rule_definition[:50]}..." if len(rule_definition) > 50 else f"Adding rule: {rule_definition}")
     result = execute_command(f"-addRule {rule_definition}")
     try:
         StringModel(value=result)
@@ -538,7 +706,7 @@ async def add_model(model_definition: str, ctx: Context) -> str:
         StringModel(value=model_definition)
     except Exception as e:
         return f"ERROR: model_definition must be a string: {e}"
-    logger.info(f"Adding model: {model_definition[:50]}..." if len(model_definition) > 50 else f"Adding model: {model_definition}")
+    safe_log(logger.info, f"Adding model: {model_definition[:50]}..." if len(model_definition) > 50 else f"Adding model: {model_definition}")
     result = execute_command(f"-addModel {model_definition}")
     try:
         StringModel(value=result)
@@ -566,7 +734,7 @@ async def add_action(action_definition: str, ctx: Context) -> str:
         StringModel(value=action_definition)
     except Exception as e:
         return f"ERROR: action_definition must be a string: {e}"
-    logger.info(f"Adding action: {action_definition[:50]}..." if len(action_definition) > 50 else f"Adding action: {action_definition}")
+    safe_log(logger.info, f"Adding action: {action_definition[:50]}..." if len(action_definition) > 50 else f"Adding action: {action_definition}")
     result = execute_command(f"-addAction {action_definition}")
     try:
         StringModel(value=result)
@@ -736,6 +904,9 @@ def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
         logger.error(error_msg)
         return f"Error: {error_msg}"
     
+    # Log function call (API key will be automatically redacted)
+    log_function_call("request_lot_code", query=query, context=context, api_key=api_key)
+    
     # DigitalOcean Agent Platform API endpoint
     api_url = "https://xtov5ljwjkydusw2zpus4yxe.agents.do-ai.run/api/v1/chat/completions"
     
@@ -760,8 +931,8 @@ def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
             "include_guardrails_info": False
         }
         
-        logger.debug(f"Sending request to DO Agent Platform: {json.dumps(payload, ensure_ascii=False)[:200]}...")
-        logger.info(f"Requesting LOT code generation with query: {query[:50]}..." if len(query) > 50 else f"Requesting LOT code generation with query: {query}")
+        safe_log(logger.debug, f"Sending request to DO Agent Platform: {json.dumps(payload, ensure_ascii=False)[:200]}...")
+        safe_log(logger.info, f"Requesting LOT code generation with query: {query[:50]}..." if len(query) > 50 else f"Requesting LOT code generation with query: {query}")
     except Exception as e:
         error_msg = f"Failed to create payload: {str(e)}"
         logger.error(error_msg)
@@ -778,9 +949,9 @@ def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
         response = requests.post(api_url, json=payload, headers=headers, timeout=30)
         
         # Debug the raw response
-        logger.debug(f"Raw API response status: {response.status_code}")
-        logger.debug(f"Raw API response headers: {dict(response.headers)}")
-        logger.debug(f"Raw API response content: {response.text[:200]}..." if len(response.text) > 200 else response.text)
+        safe_log(logger.debug, f"Raw API response status: {response.status_code}")
+        safe_log(logger.debug, f"Raw API response headers: {dict(response.headers)}")
+        safe_log(logger.debug, f"Raw API response content: {response.text[:200]}..." if len(response.text) > 200 else response.text)
         
         if response.status_code == 200:
             # Process the response from Coreflux Copilot
@@ -849,7 +1020,7 @@ def process_do_agent_response(response_text):
     except Exception as e:
         error_msg = f"Error processing API response: {str(e)}"
         logger.error(error_msg)
-        logger.debug(f"Problematic response: {cleaned_text[:500]}...")
+        safe_log(logger.debug, f"Problematic response: {cleaned_text[:500]}...")
         return f"Error: {error_msg}"
 
 def format_do_agent_output(result):
@@ -1094,6 +1265,10 @@ async def setup_mqtt_connection(broker: str, port: int = 1883, username: str = N
     """
     global mqtt_client, args
     
+    # Log function call with sanitized arguments (password will be redacted)
+    log_function_call("setup_mqtt_connection", broker=broker, port=port, username=username, 
+                     password=password, client_id=client_id, use_tls=use_tls)
+    
     # Generate client ID if not provided
     if not client_id:
         client_id = f"coreflux-mcp-{uuid.uuid4().hex[:8]}"
@@ -1118,7 +1293,7 @@ async def setup_mqtt_connection(broker: str, port: int = 1883, username: str = N
             logger.warning(f"Error disconnecting from previous broker: {e}")
     
     # Setup new connection
-    logger.info(f"Setting up new MQTT connection to {broker}:{port}")
+    safe_log(logger.info, f"Setting up new MQTT connection to {broker}:{port}")
     setup_result = setup_mqtt(args)
     
     if setup_result:
@@ -1200,7 +1375,7 @@ async def mqtt_connect(broker: str, port: int = 1883, username: str = None, pass
         client_id = f"coreflux-mcp-{uuid.uuid4().hex[:8]}"
     
     # Log the attempt
-    logger.info(f"Attempting to connect to MQTT broker at {broker}:{port} with client ID: {client_id}")
+    safe_log(logger.info, f"Attempting to connect to MQTT broker at {broker}:{port} with client ID: {client_id}")
     
     try:
         # Create new client
@@ -1210,7 +1385,7 @@ async def mqtt_connect(broker: str, port: int = 1883, username: str = None, pass
         # Set up authentication if provided
         if username and password:
             mqtt_client.username_pw_set(username, password)
-            logger.debug(f"Using MQTT authentication with username: {username}")
+            safe_log(logger.debug, f"Using MQTT authentication with username: {username}")
         
         # Configure TLS if enabled
         if use_tls:
@@ -1284,8 +1459,8 @@ async def mqtt_publish(topic: str, message, qos: int = 0, retain: bool = False, 
             return f"ERROR: {error_msg}"
         
         # Log the attempt
-        logger.info(f"Publishing to topic '{topic}' with QoS {qos}, retain={retain}")
-        logger.debug(f"Message payload: {payload[:100]}{'...' if len(payload) > 100 else ''}")
+        safe_log(logger.info, f"Publishing to topic '{topic}' with QoS {qos}, retain={retain}")
+        safe_log(logger.debug, f"Message payload: {payload[:100]}{'...' if len(payload) > 100 else ''}")
         
         # Publish the message
         result = mqtt_client.publish(topic, payload, qos=qos, retain=retain)
