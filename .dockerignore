@@ -1,0 +1,61 @@
+# Git and version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache
+.mypy_cache
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Development files
+requirements-dev.txt
+tests/
+.coverage
+htmlcov/
+bandit-report.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# Documentation
+*.md
+docs/
+
+# Logs
+*.log
+logs/
+
+# Certificates (these should be mounted)
+*.pem
+*.crt
+*.key
+certs/
+
+# Temporary files
+*.tmp
+*.temp

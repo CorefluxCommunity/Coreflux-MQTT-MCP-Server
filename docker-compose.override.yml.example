@@ -1,0 +1,32 @@
+# docker-compose.override.yml.example
+# Copy this file to docker-compose.override.yml and customize for your environment
+# This file is ignored by git for security
+
+version: '3.8'
+
+services:
+  coreflux-mcp-server:
+    # Development overrides
+    volumes:
+      # Mount source code for development (remove in production)
+      - .:/app
+    
+    # Development environment variables
+    environment:
+      - LOG_LEVEL=DEBUG
+      
+    # Expose additional ports for debugging if needed
+    # ports:
+    #   - "3000:3000"
+
+# Example production overrides:
+# services:
+#   coreflux-mcp-server:
+#     environment:
+#       - MQTT_BROKER=production-broker.example.com
+#       - MQTT_PORT=8883
+#       - MQTT_USE_TLS=true
+#       - MQTT_CA_CERT=/app/certs/ca.crt
+#       - LOG_LEVEL=WARNING
+#     volumes:
+#       - /path/to/production/certs:/app/certs:ro
