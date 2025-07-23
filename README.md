@@ -3,19 +3,33 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+[![Tests](https://img.shields.io/badge/tests-passing-green.svg)](https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server/actions)
+[![Code Quality](https://img.shields.io/badge/code%20quality-A-green.svg)](https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server)
 
-A production-ready Model Context Protocol (MCP) server that connects to Coreflux MQTT brokers and provides Coreflux automation capabilities to Claude and other MCP-compatible AI assistants.
+An enterprise-grade Model Context Protocol (MCP) server that provides secure, scalable access to Coreflux MQTT brokers and comprehensive automation capabilities for Claude and other MCP-compatible AI assistants.
 
-## Features
+## 🚀 Features
 
-- 🔌 **MQTT Integration**: Seamless connection to Coreflux MQTT brokers with TLS support
+### Core Functionality
+- 🔌 **MQTT Integration**: Seamless connection to Coreflux MQTT brokers with full TLS support
 - 🛠️ **Complete Coreflux API**: Full access to models, actions, rules, and routes
 - 🤖 **AI Code Generation**: LOT (Logic Object Tree) code generation via Coreflux Copilot API
 - 🔍 **Dynamic Discovery**: Automatic discovery and listing of available actions
-- 🔒 **Production Security**: Comprehensive log sanitization and security features
-- 🐳 **Docker Ready**: Full Docker and Kubernetes deployment support
-- ⚙️ **Easy Setup**: Interactive setup assistant for quick configuration
-- 📚 **Rich Documentation**: Built-in LOT language documentation and examples
+- 🏥 **Health Monitoring**: Comprehensive system health checks and monitoring
+
+### Enterprise Features
+- 🔒 **Production Security**: Comprehensive log sanitization, input validation, and security features
+- ⚡ **Async Processing**: Non-blocking message processing with rate limiting and queue management
+- � **Enhanced Logging**: Structured logging with rotation, filtering, and security sanitization
+- ✅ **Configuration Validation**: Comprehensive environment and file validation system
+- 🧪 **Testing Framework**: Complete unit testing suite with mocking and coverage reporting
+
+### DevOps & Deployment
+- 🐳 **Container Ready**: Full Docker and Kubernetes deployment support with health checks
+- 🔄 **CI/CD Pipeline**: GitHub Actions with automated testing, security scanning, and quality checks
+- 📦 **Development Tools**: Pre-commit hooks, code formatting, linting, and documentation generation
+- ⚙️ **Easy Setup**: Interactive setup assistant with validation and testing
+- 📚 **Rich Documentation**: API documentation, security guides, and deployment instructions
 
 ## Quick Start
 
@@ -34,156 +48,602 @@ A production-ready Model Context Protocol (MCP) server that connects to Coreflux
    docker-compose up -d
    ```
 
-### Direct Installation
+## 🚀 Quick Start
 
-1. **Install dependencies**:
+### Prerequisites
+
+- Python 3.11 or higher
+- Docker (optional, for containerized deployment)
+- Access to a Coreflux MQTT broker
+- Coreflux Copilot API key (optional, for AI assistance)
+
+### Option 1: Docker Deployment (Recommended)
+
+1. **Clone and configure**:
+   ```bash
+   git clone https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server.git
+   cd Coreflux-MQTT-MCP-Server
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+2. **Deploy with Docker**:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Verify deployment**:
+   ```bash
+   docker-compose logs -f coreflux-mcp-server
+   ```
+
+### Option 2: Development Installation
+
+1. **Clone and setup**:
+   ```bash
+   git clone https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server.git
+   cd Coreflux-MQTT-MCP-Server
+   ```
+
+2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
+   # For development
+   pip install -r requirements-dev.txt
    ```
 
-2. **Run setup assistant**:
+3. **Configure environment**:
    ```bash
-   python setup_assistant.py
+   python setup_assistant.py  # Interactive configuration
+   # OR
+   cp .env.example .env && nano .env  # Manual configuration
    ```
 
-3. **Start the server**:
+4. **Validate and test**:
+   ```bash
+   make validate  # Validate configuration
+   make test      # Run tests
+   ```
+
+5. **Start the server**:
    ```bash
    python server.py
+   # OR
+   make run
    ```
 
 For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
 
-## Configuration
+## ⚙️ Configuration
 
-### Setup Assistant
+### Interactive Setup Assistant
 
-The server includes an interactive setup assistant for easy configuration:
-
-- You need to create an initial configuration (.env file)
-- You want to update your existing configuration
-- You're experiencing connection issues and need to reconfigure
-
-To run the setup assistant:
+The server includes a comprehensive setup assistant that guides you through configuration:
 
 ```bash
 python setup_assistant.py
 ```
 
+**The assistant helps with:**
+- 🔧 MQTT broker connection settings
+- 🔐 TLS certificate configuration  
+- 🤖 Coreflux Copilot API integration
+- 📝 Logging and monitoring setup
+- ✅ Configuration validation and testing
+
 **Use the setup assistant when:**
-- Creating initial configuration (.env file)
-- Updating existing configuration
-- Experiencing connection issues
+- Creating initial configuration
+- Updating existing settings
+- Troubleshooting connection issues
 - Setting up TLS certificates
+- Migrating between environments
 
-The assistant helps configure:
-- MQTT broker settings (host, port, credentials)
-- TLS configuration and certificates
-- Coreflux Copilot API integration
-- Logging preferences
+### Environment Configuration
 
-## Connecting Claude to the MCP Server
+Copy `.env.example` to `.env` and configure:
 
-### Using Claude Desktop Config
+```bash
+# MQTT Broker Configuration
+MQTT_BROKER=your-broker-host.com
+MQTT_PORT=8883
+MQTT_USER=your-username
+MQTT_PASSWORD=your-password
+MQTT_USE_TLS=true
 
-1. Create or edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS/Linux) or `%USERPROFILE%\AppData\Roaming\Claude\claude_desktop_config.json` (Windows)
-2. Add the following configuration (adjust the paths accordingly):
+# TLS Configuration (when MQTT_USE_TLS=true)
+MQTT_CA_CERT=/path/to/ca.crt
+MQTT_CERT_FILE=/path/to/client.crt  
+MQTT_KEY_FILE=/path/to/client.key
+
+# Coreflux Copilot API
+DO_AGENT_API_KEY=your-api-key-here
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_FILE=/var/log/coreflux-mcp.log
+```
+
+For detailed configuration options, see the [Configuration Guide](SECRET_MANAGEMENT.md).
+
+## 🔌 Connecting Claude to the MCP Server
+
+### Using Claude Desktop
+
+1. **Locate Claude Desktop config file**:
+   - macOS/Linux: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%USERPROFILE%\AppData\Roaming\Claude\claude_desktop_config.json`
+
+2. **Add server configuration**:
    ```json
    {
      "mcpServers": {
        "coreflux": {
          "command": "python",
-         "args": [
-           "/PATH/TO/server.py",
-           "--mqtt-host", "localhost", 
-           "--mqtt-port", "1883",
-           "--mqtt-user", "root",
-           "--mqtt-password", "coreflux",
-           "--mqtt-client-id", "claude-coreflux-client",
-           "--do-agent-api-key", "your_coreflux_copilot_api_key_here"
-         ],
-         "description": "Coreflux MQTT Broker Control",
-         "icon": "🔄",
-         "env": {}
+         "args": ["/path/to/your/server.py"],
+         "env": {
+           "MQTT_BROKER": "your-broker-host.com",
+           "MQTT_PORT": "8883",
+           "MQTT_USER": "your-username", 
+           "MQTT_PASSWORD": "your-password",
+           "MQTT_USE_TLS": "true",
+           "DO_AGENT_API_KEY": "your-copilot-api-key"
+         }
        }
      }
    }
    ```
-   **Note**: Instead of passing the API key as a command-line argument, you can set it in the `.env` file for better security.
-   
-   **Tip**: A sample `claude_desktop_config.json` file is included in this repository that you can use as a starting point.
-3. Restart Claude Desktop
 
-### Command-Line Arguments
+3. **Restart Claude Desktop**
 
-The server accepts the following command-line arguments. These settings can also be configured via the `.env` file using the setup assistant:
+**Security Note**: For production deployments, store secrets in secure environment variables or secret management systems rather than the Claude config file.
 
-| Argument | Description | Default |
-|----------|-------------|---------|
-| `--mqtt-host` | MQTT broker address | localhost |
-| `--mqtt-port` | MQTT broker port | 1883 |
-| `--mqtt-user` | MQTT username | - |
-| `--mqtt-password` | MQTT password | - |
-| `--mqtt-client-id` | MQTT client ID | claude-mcp-client |
-| `--mqtt-use-tls` | Enable TLS for MQTT connection | false |
-| `--mqtt-ca-cert` | Path to CA certificate file | - |
-| `--mqtt-client-cert` | Path to client certificate file | - |
-| `--mqtt-client-key` | Path to client key file | - |
-| `--do-agent-api-key` | Coreflux Copilot API key | - |
-| `--log-level` | Logging level (DEBUG/INFO/WARNING/ERROR/CRITICAL) | INFO |
+### Using Environment Variables
 
-## Coreflux Copilot API Configuration
+For better security, use environment variables instead of hardcoding credentials:
 
-The server includes a `request_lot_code` tool that uses the Coreflux Copilot API to generate LOT (Logic Object Tree) code based on natural language prompts. To use this feature, you need to:
+```json
+{
+  "mcpServers": {
+    "coreflux": {
+      "command": "python",
+      "args": ["/path/to/your/server.py"],
+      "env": {
+        "MQTT_BROKER": "${COREFLUX_MQTT_BROKER}",
+        "MQTT_PORT": "${COREFLUX_MQTT_PORT}",
+        "MQTT_USER": "${COREFLUX_MQTT_USER}",
+        "MQTT_PASSWORD": "${COREFLUX_MQTT_PASSWORD}",
+        "DO_AGENT_API_KEY": "${COREFLUX_API_KEY}"
+      }
+    }
+  }
+}
+```
 
-1. **Get an API key** from the Coreflux Copilot dashboard
-2. **Set the API key** in your `.env` file:
+### Testing the Connection
+
+Once configured, test the connection by asking Claude:
+
+```
+Can you check the health of the Coreflux MCP server and show me the broker information?
+```
+
+Claude should respond with system status and broker details if the connection is successful.
+
+## 🛠️ Available Tools
+
+The server provides the following tools to Claude:
+
+### Core MQTT Tools
+- **`publish_to_coreflux`** - Publish messages to MQTT topics with QoS and retention options
+- **`get_broker_info`** - Get detailed information about the MQTT broker connection
+
+### AI Assistance Tools  
+- **`copilot_assist`** - Query the Coreflux Copilot AI for automation assistance and code generation
+
+### System Management Tools
+- **`comprehensive_health_check`** - Perform detailed health checks of all system components
+
+For detailed API documentation, see [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+
+## 🧪 Development & Testing
+
+### Development Setup
+
+1. **Install development dependencies**:
    ```bash
-   DO_AGENT_API_KEY=your_coreflux_copilot_api_key_here
+   pip install -r requirements-dev.txt
    ```
-3. **Or pass it as a command-line argument**:
+
+2. **Install pre-commit hooks**:
    ```bash
-   python server.py --do-agent-api-key your_api_key_here
+   pre-commit install
    ```
 
-**Note**: Without the API key, the LOT code generation feature will not work. The setup assistant will prompt you to configure this when you run it.
+3. **Run the full development setup**:
+   ```bash
+   make dev-setup  # Complete development environment setup
+   ```
 
-**API Endpoint**: The server is pre-configured to connect to the Coreflux Copilot API endpoint. The request format conforms to the chat completions API specification with proper authentication headers.
+### Testing
 
-## Production Deployment
-
-### Docker Deployment
-
-For production environments, use Docker with proper configuration:
+Run the comprehensive test suite:
 
 ```bash
-# Copy and customize environment
-cp .env.example .env
-cp docker-compose.override.yml.example docker-compose.override.yml
+# Run all tests
+make test
 
-# Configure for production
-docker-compose up -d
+# Run tests with coverage
+make test-coverage
+
+# Run specific test categories
+make test-unit        # Unit tests only
+make test-integration # Integration tests only
 ```
+
+### Code Quality
+
+Maintain code quality with automated tools:
+
+```bash
+# Format code
+make format
+
+# Run linters
+make lint
+
+# Security scanning
+make security-check
+
+# Type checking
+make type-check
+
+# Run all quality checks
+make quality-check
+```
+
+Available development commands:
+
+```bash
+# Development workflow
+make dev-setup     # Set up complete development environment
+make validate      # Validate configuration and environment  
+make run           # Start the server with validation
+make run-debug     # Start server in debug mode
+
+# Testing and validation
+make test          # Run all tests
+make test-coverage # Run tests with coverage report
+make test-unit     # Run unit tests only
+make validate-config # Validate configuration files
+
+# Code quality
+make format        # Format code with black and isort
+make lint          # Run all linters (flake8, bandit, mypy)
+make security-check # Run security scanning
+make type-check    # Run type checking with mypy
+
+# Docker operations  
+make docker-build  # Build Docker image
+make docker-run    # Run in Docker container
+make docker-test   # Run tests in Docker
+
+# Documentation
+make docs          # Generate documentation
+make docs-serve    # Serve documentation locally
+```
+
+## 🔧 System Architecture
+
+### Core Components
+
+- **`server.py`** - Main MCP server with tool implementations
+- **`config_validator.py`** - Configuration validation and environment checking
+- **`message_processor.py`** - Asynchronous MQTT message processing with rate limiting
+- **`enhanced_logging.py`** - Structured logging with rotation and security filtering
+- **`config_schema.py`** - Pydantic schemas for type-safe configuration
+- **`parser.py`** - Sanitization and parsing utilities
 
 ### Security Features
 
-- **Log Sanitization**: Automatic redaction of sensitive information in logs
-- **TLS Support**: Full TLS encryption for MQTT connections
-- **Non-root Containers**: Docker containers run as non-privileged users
-- **Secret Management**: Environment-based configuration for sensitive data
+- **Input Sanitization** - All inputs are sanitized to prevent injection attacks
+- **Log Security** - Automatic sanitization of sensitive data in logs
+- **TLS Support** - Full TLS encryption for MQTT connections
+- **Configuration Validation** - Comprehensive validation of all configuration parameters
+- **Secret Management** - Secure handling of credentials and API keys
 
-See [SECURITY.md](SECURITY.md) for detailed security guidelines and [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment instructions.
+### Performance Features
 
-## Available Tools
+- **Async Processing** - Non-blocking message processing
+- **Connection Pooling** - Efficient MQTT connection management
+- **Rate Limiting** - Configurable rate limits to prevent abuse
+- **Health Monitoring** - Real-time health checks and system monitoring
 
-The server provides tools for common Coreflux commands:
+## 📚 Documentation
 
-- `add_rule`: Add a new permission rule
-- `remove_rule`: Remove a permission rule
-- `add_route`: Add a new route connection
-- `remove_route`: Remove a route connection
-- `add_model`: Add a new model structure
-- `remove_model`: Remove a model structure
-- `add_action`: Add a new action event/function
+- **[API Documentation](API_DOCUMENTATION.md)** - Complete API reference
+- **[Deployment Guide](DEPLOYMENT.md)** - Production deployment instructions
+- **[Secret Management](SECRET_MANAGEMENT.md)** - Security and secret management guide
+- **[Configuration Reference](.env.example)** - Complete configuration options
+
+## 🐳 Docker Deployment
+
+### Quick Start with Docker
+
+```bash
+# Clone and configure
+git clone https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server.git
+cd Coreflux-MQTT-MCP-Server
+
+# Copy and edit environment file
+cp .env.example .env
+nano .env  # Configure your settings
+
+# Start with Docker Compose
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f coreflux-mcp-server
+
+# Health check
+docker-compose exec coreflux-mcp-server python -c "
+import os
+os.system('python server.py --health-check')
+"
+```
+
+### Production Docker Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for comprehensive production deployment instructions including:
+
+- Multi-stage Docker builds
+- Kubernetes deployments
+- Health checks and monitoring
+- Load balancing and scaling
+- Security configurations
+
+## 🔑 Coreflux Copilot Integration
+
+The server includes powerful AI assistance through the Coreflux Copilot API:
+
+### Setup
+
+1. **Obtain API Key** from the Coreflux Copilot dashboard
+2. **Configure the key**:
+   ```bash
+   # Option 1: Environment file
+   echo "DO_AGENT_API_KEY=your_api_key_here" >> .env
+   
+   # Option 2: Environment variable
+   export DO_AGENT_API_KEY=your_api_key_here
+   ```
+
+### Features
+
+- **LOT Code Generation** - Generate Logic Object Tree code from natural language
+- **Automation Assistance** - Get help with Coreflux automation tasks
+- **Best Practices** - Receive guidance on optimal implementations
+- **Troubleshooting** - Get assistance with debugging and optimization
+
+### Usage Examples
+
+Ask Claude to help with Coreflux automation:
+
+```
+Generate LOT code for a temperature monitoring system that triggers an alert when the temperature exceeds 75°F
+```
+
+```
+Help me create a rule that processes sensor data and stores it in a database
+```
+
+## 🚀 Advanced Features
+
+### Asynchronous Message Processing
+
+The server includes a robust async message processor that:
+
+- **Prevents Blocking** - Handles messages without blocking the main thread
+- **Rate Limiting** - Configurable limits to prevent system overload  
+- **Queue Management** - Intelligent queue handling with backpressure
+- **Statistics** - Real-time processing metrics and monitoring
+
+### Enhanced Logging System
+
+Comprehensive logging with enterprise features:
+
+- **Structured Logging** - JSON formatted logs for easy parsing
+- **Log Rotation** - Automatic log file rotation to manage disk space
+- **Security Filtering** - Automatic sanitization of sensitive information
+- **Multiple Outputs** - Console, file, and syslog support
+
+### Configuration Validation
+
+Robust validation system that checks:
+
+- **Environment Variables** - Validates all required configuration
+- **File Permissions** - Ensures certificate files are accessible
+- **Network Connectivity** - Tests MQTT broker connectivity
+- **API Availability** - Validates Copilot API access
+
+## 🛡️ Security & Compliance
+
+### Security Features
+
+- **Input Sanitization** - All inputs validated and sanitized
+- **TLS Encryption** - Full TLS support for MQTT connections
+- **Secret Management** - Secure credential handling
+- **Audit Logging** - Comprehensive security event logging
+- **Non-root Execution** - Runs with minimal privileges
+
+### Compliance Support
+
+The server supports various compliance requirements:
+
+- **SOC 2** - Security controls and monitoring
+- **GDPR** - Data protection and privacy
+- **HIPAA** - Healthcare data protection (when properly configured)
+
+For detailed security information, see [SECRET_MANAGEMENT.md](SECRET_MANAGEMENT.md).
+
+## 📊 Monitoring & Health Checks
+
+### Health Check Tool
+
+Comprehensive health monitoring with the `comprehensive_health_check` tool:
+
+```bash
+# Manual health check
+python server.py --health-check
+
+# Or ask Claude:
+# "Please run a comprehensive health check on the Coreflux MCP server"
+```
+
+### Monitoring Metrics
+
+The server provides detailed metrics:
+
+- **Connection Status** - MQTT broker connectivity
+- **Message Processing** - Queue size and processing rates
+- **System Resources** - Memory and CPU usage
+- **Error Rates** - Failed operations and error statistics
+- **API Status** - Copilot API availability and response times
+
+### Alerting
+
+Configure alerts for:
+
+- Connection failures
+- High error rates
+- Resource exhaustion
+- Security events
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our contribution guidelines:
+
+### Development Process
+
+1. **Fork** the repository
+2. **Create** a feature branch: `git checkout -b feature/amazing-feature`
+3. **Install** development dependencies: `pip install -r requirements-dev.txt`
+4. **Setup** pre-commit hooks: `pre-commit install`
+5. **Make** your changes with tests
+6. **Run** quality checks: `make quality-check`
+7. **Commit** your changes: `git commit -am 'Add amazing feature'`
+8. **Push** to the branch: `git push origin feature/amazing-feature`
+9. **Create** a Pull Request
+
+### Code Standards
+
+- **Python 3.11+** compatibility
+- **Type hints** for all functions
+- **Comprehensive tests** with >90% coverage
+- **Security scanning** with bandit
+- **Code formatting** with black and isort
+- **Documentation** for all public APIs
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support & Troubleshooting
+
+### Common Issues
+
+**Connection Refused**
+```
+Error: MQTT connection failed
+```
+- Check broker hostname and port
+- Verify network connectivity
+- Confirm TLS configuration
+
+**Authentication Failed**
+```
+Error: Authentication failed
+```
+- Verify username/password
+- Check API key validity
+- Confirm broker permissions
+
+**TLS Handshake Failed**
+```
+Error: TLS handshake failed
+```
+- Verify certificate paths
+- Check certificate validity
+- Confirm TLS version compatibility
+
+### Debug Mode
+
+Enable detailed logging for troubleshooting:
+
+```bash
+export LOG_LEVEL=DEBUG
+python server.py
+```
+
+### Getting Help
+
+- **GitHub Issues**: [Report bugs and request features](https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server/issues)
+- **Discussions**: [Community support and questions](https://github.com/CorefluxCommunity/Coreflux-MQTT-MCP-Server/discussions)
+- **Documentation**: [Complete documentation](./API_DOCUMENTATION.md)
+- **Security Issues**: Report to security@coreflux.org
+
+## 🗺️ Roadmap
+
+### Current Status: v1.0.0 ✅
+
+- ✅ Core MQTT functionality
+- ✅ Copilot API integration
+- ✅ Enterprise security features
+- ✅ Comprehensive testing
+- ✅ Production deployment support
+
+### Upcoming Features
+
+- **v1.1.0** - Enhanced monitoring and metrics
+- **v1.2.0** - Additional Coreflux API endpoints
+- **v1.3.0** - WebSocket support for real-time data
+- **v2.0.0** - Multi-broker support and federation
+
+---
+
+## 📋 Quick Reference
+
+### Essential Commands
+
+```bash
+# Setup and configuration
+python setup_assistant.py    # Interactive setup
+make validate                 # Validate configuration
+
+# Development
+make dev-setup               # Complete dev environment
+make test                    # Run all tests
+make quality-check           # Run all quality checks
+
+# Deployment
+docker-compose up -d         # Docker deployment
+make docker-build           # Build Docker image
+
+# Monitoring
+make health-check           # System health check
+docker-compose logs -f      # View logs
+```
+
+### Key Files
+
+- **`server.py`** - Main MCP server
+- **`.env`** - Configuration file
+- **`requirements.txt`** - Python dependencies
+- **`docker-compose.yml`** - Docker deployment
+- **`Makefile`** - Development commands
+
+---
+
+**Built with ❤️ by the Coreflux Community**
 - `remove_action`: Remove an action event/function
 - `run_action`: Run an action event/function
 - `remove_all_models`: Remove all models

@@ -191,6 +191,13 @@ def is_potentially_sensitive(value: str) -> bool:
 # Load environment variables from .env file if it exists
 load_dotenv()
 
+# Import configuration validator
+from config_validator import ConfigurationValidator, ConfigurationError
+
+# Import enhanced systems
+from message_processor import get_message_processor, MessageProcessor
+from enhanced_logging import get_log_manager, setup_logging as enhanced_setup_logging
+
 # Configure logging
 def setup_logging(level_name):
     # Special handling for NONE level
@@ -260,6 +267,24 @@ def parse_args():
 args = parse_args()
 logger = setup_logging(args.log_level)
 
+# Validate configuration before proceeding
+config_validator = ConfigurationValidator(logger)
+try:
+    logger.info("Validating server configuration...")
+    is_valid = config_validator.log_configuration_status()
+    
+    if not is_valid:
+        logger.error("Configuration validation failed. Please check your environment variables.")
+        logger.info("Run 'python setup_assistant.py' to configure the server.")
+        # Don't exit here - allow server to start for configuration tools to work
+        logger.warning("Starting server anyway to allow configuration via MCP tools.")
+    else:
+        logger.info("Configuration validation passed successfully.")
+        
+except Exception as e:
+    logger.error(f"Error during configuration validation: {str(e)}")
+    logger.warning("Continuing with startup despite validation error.")
+
 # Configure FastMCP server
 mcp = FastMCP(
     "Coreflux Broker",
@@ -267,7 +292,11 @@ mcp = FastMCP(
     dependencies=["paho-mqtt"]
 )
 
-# Global MQTT client
+# Initialize enhanced message processor
+message_processor = get_message_processor(logger)
+logger.info("Enhanced message processor initialized")
+
+# Global MQTT client and enhanced message processing
 mqtt_client = None
 discovered_actions = {}
 registered_dynamic_tools = set()  # Keep track of dynamically registered tools
@@ -279,7 +308,10 @@ connection_status = {
 }
 server_start_time = datetime.now()
 mqtt_subscriptions = {}  # Track active subscriptions
-mqtt_message_buffer = {}  # Buffer to store received messages
+mqtt_message_buffer = {}  # Legacy buffer for backward compatibility
+
+# Enhanced message processing
+message_processor = None  # Will be initialized with logger
 
 # MQTT connection and message handling
 def on_connect(client, userdata, flags, rc, properties=None):
@@ -321,14 +353,23 @@ def on_disconnect(client, userdata, rc, properties=None, reason_code=0):
 
 def on_message(client, userdata, msg):
     try:
-        # Store message in buffer
+        # Store message in buffer (legacy support)
         topic = msg.topic
         try:
             payload = msg.payload.decode('utf-8')
         except UnicodeDecodeError:
             payload = str(msg.payload)
         
-        # Initialize topic in buffer if it doesn't exist
+        # Enhanced message processing
+        if message_processor:
+            metadata = {
+                "qos": msg.qos,
+                "retain": msg.retain,
+                "timestamp": time.time()
+            }
+            message_processor.add_message(topic, payload, metadata)
+        
+        # Legacy buffer (for backward compatibility)
         if topic not in mqtt_message_buffer:
             mqtt_message_buffer[topic] = []
         
@@ -1777,6 +1818,218 @@ async def mqtt_monitor_topic(topic: str, qos: int = 0, ctx: Context = None) -> s
         return f"ERROR: {e}"
 
 # endregion
+
+@mcp.tool()
+async def comprehensive_health_check(ctx: Context) -> str:
+    """
+    Perform a comprehensive health check of the Coreflux MCP Server
+    
+    Checks:
+    - Configuration validation
+    - MQTT connection status
+    - Message processing status
+    - Log system status
+    - System resources
+    - Recent errors
+    
+    Returns:
+        A detailed health report with status and recommendations
+    """
+    health_report = {
+        "timestamp": datetime.now().isoformat(),
+        "overall_status": "unknown",
+        "checks": {},
+        "recommendations": [],
+        "statistics": {}
+    }
+    
+    all_checks_passed = True
+    
+    try:
+        # 1. Configuration Check
+        logger.info("Running comprehensive health check...")
+        config_validator = ConfigurationValidator(logger)
+        is_valid, errors, warnings = config_validator.validate_environment()
+        
+        health_report["checks"]["configuration"] = {
+            "status": "pass" if is_valid else "fail",
+            "errors": errors,
+            "warnings": warnings
+        }
+        
+        if not is_valid:
+            all_checks_passed = False
+            health_report["recommendations"].append("Fix configuration errors before deployment")
+        
+        # 2. MQTT Connection Check
+        mqtt_status = "connected" if connection_status["connected"] else "disconnected"
+        health_report["checks"]["mqtt_connection"] = {
+            "status": mqtt_status,
+            "details": {
+                "connected": connection_status["connected"],
+                "last_connection_attempt": connection_status.get("last_connection_attempt"),
+                "reconnect_count": connection_status.get("reconnect_count", 0),
+                "last_error": connection_status.get("last_error")
+            }
+        }
+        
+        if not connection_status["connected"]:
+            health_report["recommendations"].append("Establish MQTT connection using mqtt_connect tool")
+        
+        # 3. Message Processing Check
+        if message_processor:
+            proc_stats = message_processor.get_statistics()
+            health_report["checks"]["message_processing"] = {
+                "status": "active" if message_processor.processing_active else "inactive",
+                "statistics": proc_stats
+            }
+            
+            # Check processing rate
+            if proc_stats.get("processing_rate", 0) == 0 and proc_stats.get("messages_received", 0) > 0:
+                all_checks_passed = False
+                health_report["recommendations"].append("Message processing appears stalled")
+        else:
+            health_report["checks"]["message_processing"] = {
+                "status": "not_initialized",
+                "error": "Message processor not available"
+            }
+            all_checks_passed = False
+        
+        # 4. Log System Check
+        try:
+            log_manager = get_log_manager()
+            log_stats = log_manager.get_log_stats()
+            health_report["checks"]["logging"] = {
+                "status": "active",
+                "statistics": log_stats
+            }
+            
+            # Check log file sizes
+            total_size_mb = log_stats.get("total_size_bytes", 0) / (1024 * 1024)
+            if total_size_mb > 100:  # More than 100MB
+                health_report["recommendations"].append(f"Log files are large ({total_size_mb:.1f}MB), consider cleanup")
+                
+        except Exception as e:
+            health_report["checks"]["logging"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # 5. Server Uptime and Statistics
+        uptime = datetime.now() - server_start_time
+        health_report["statistics"]["uptime"] = {
+            "seconds": int(uptime.total_seconds()),
+            "human_readable": str(uptime),
+            "start_time": server_start_time.isoformat()
+        }
+        
+        # 6. Discovery Statistics
+        health_report["statistics"]["discovery"] = {
+            "discovered_actions": len(discovered_actions),
+            "registered_dynamic_tools": len(registered_dynamic_tools),
+            "active_subscriptions": len(mqtt_subscriptions)
+        }
+        
+        # 7. Memory Usage (simple check)
+        import sys
+        try:
+            if hasattr(sys, 'getsizeof'):
+                buffer_size = sys.getsizeof(mqtt_message_buffer)
+                health_report["statistics"]["memory"] = {
+                    "message_buffer_bytes": buffer_size,
+                    "topics_in_buffer": len(mqtt_message_buffer)
+                }
+                
+                if buffer_size > 10 * 1024 * 1024:  # More than 10MB
+                    health_report["recommendations"].append("Message buffer is large, consider clearing old messages")
+        except Exception:
+            pass
+        
+        # 8. Recent Errors Check
+        if connection_status.get("last_error"):
+            health_report["checks"]["recent_errors"] = {
+                "status": "warning",
+                "last_error": connection_status["last_error"]
+            }
+            health_report["recommendations"].append("Check recent error: " + str(connection_status["last_error"]))
+        else:
+            health_report["checks"]["recent_errors"] = {
+                "status": "clean"
+            }
+        
+        # 9. API Integration Check
+        if os.environ.get('DO_AGENT_API_KEY'):
+            health_report["checks"]["api_integration"] = {
+                "status": "configured",
+                "note": "API key is configured"
+            }
+        else:
+            health_report["checks"]["api_integration"] = {
+                "status": "not_configured",
+                "note": "DO_AGENT_API_KEY not set"
+            }
+            health_report["recommendations"].append("Configure DO_AGENT_API_KEY for LOT code generation")
+        
+        # Overall Status
+        if all_checks_passed and connection_status["connected"]:
+            health_report["overall_status"] = "healthy"
+        elif connection_status["connected"]:
+            health_report["overall_status"] = "degraded"
+        else:
+            health_report["overall_status"] = "unhealthy"
+        
+        # Format the response
+        status_emoji = {
+            "healthy": "✅",
+            "degraded": "⚠️",
+            "unhealthy": "❌"
+        }
+        
+        result = f"{status_emoji[health_report['overall_status']]} **Coreflux MCP Server Health Check**\n\n"
+        result += f"**Overall Status:** {health_report['overall_status'].upper()}\n"
+        result += f"**Check Time:** {health_report['timestamp']}\n\n"
+        
+        # Individual Checks
+        result += "**Component Status:**\n"
+        for check_name, check_data in health_report["checks"].items():
+            status = check_data.get("status", "unknown")
+            emoji = "✅" if status in ["pass", "active", "connected", "clean", "configured"] else \
+                   "⚠️" if status in ["warning", "degraded", "not_configured"] else "❌"
+            result += f"- {emoji} {check_name.replace('_', ' ').title()}: {status}\n"
+        
+        # Statistics
+        if health_report["statistics"]:
+            result += "\n**Statistics:**\n"
+            uptime_stats = health_report["statistics"].get("uptime", {})
+            if uptime_stats:
+                result += f"- Uptime: {uptime_stats.get('human_readable', 'unknown')}\n"
+            
+            discovery_stats = health_report["statistics"].get("discovery", {})
+            if discovery_stats:
+                result += f"- Discovered Actions: {discovery_stats.get('discovered_actions', 0)}\n"
+                result += f"- Active Subscriptions: {discovery_stats.get('active_subscriptions', 0)}\n"
+            
+            if message_processor:
+                proc_stats = message_processor.get_statistics()
+                result += f"- Messages Processed: {proc_stats.get('messages_processed', 0)}\n"
+                result += f"- Processing Rate: {proc_stats.get('processing_rate', 0):.2f} msg/sec\n"
+        
+        # Recommendations
+        if health_report["recommendations"]:
+            result += "\n**Recommendations:**\n"
+            for i, rec in enumerate(health_report["recommendations"], 1):
+                result += f"{i}. {rec}\n"
+        
+        if health_report["overall_status"] == "healthy":
+            result += "\n🎉 **All systems operational!**"
+        
+        logger.info(f"Health check completed - Status: {health_report['overall_status']}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error during health check: {str(e)}"
+        logger.error(error_msg)
+        return f"❌ **Health Check Failed**\n\nError: {error_msg}\n\nPlease check server logs for details."
 
 if __name__ == "__main__":
     try:
