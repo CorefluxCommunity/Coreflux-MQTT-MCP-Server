@@ -1,0 +1,99 @@
+# Kubernetes Production Deployment Example
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coreflux-mcp
+  labels:
+    name: coreflux-mcp
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coreflux-mcp-secrets
+  namespace: coreflux-mcp
+type: Opaque
+stringData:
+  MQTT_BROKER: "mqtt.production.com"
+  MQTT_PORT: "8883"
+  MQTT_USER: "production_user"
+  MQTT_PASSWORD: "secure_production_password"
+  DO_AGENT_API_KEY: "your_production_api_key_here"
+  MQTT_USE_TLS: "true"
+  LOG_LEVEL: "INFO"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coreflux-mcp-server
+  namespace: coreflux-mcp
+  labels:
+    app: coreflux-mcp-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: coreflux-mcp-server
+  template:
+    metadata:
+      labels:
+        app: coreflux-mcp-server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: coreflux-mcp-server
+        image: ghcr.io/corefluxcommunity/coreflux-mqtt-mcp-server:latest
+        imagePullPolicy: Always
+        envFrom:
+        - secretRef:
+            name: coreflux-mcp-secrets
+        env:
+        - name: MQTT_CLIENT_ID
+          value: "coreflux-mcp-k8s-$(HOSTNAME)"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - healthcheck.py
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - healthcheck.py
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coreflux-mcp-service
+  namespace: coreflux-mcp
+spec:
+  selector:
+    app: coreflux-mcp-server
+  ports:
+  - name: health
+    port: 3000
+    targetPort: 3000
+  type: ClusterIP

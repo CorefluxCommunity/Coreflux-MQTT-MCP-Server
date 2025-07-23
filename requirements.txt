@@ -1,5 +1,18 @@
+# Coreflux MCP Server Dependencies
+# Production versions with security considerations
+
+# MCP Framework
 fastmcp==0.4.0
-paho-mqtt==2.0.0
-requests==2.31.0
-python-dotenv==1.0.1
 mcp[cli]==1.2.0
+
+# MQTT Client
+paho-mqtt==2.0.0
+
+# HTTP Requests for Coreflux Copilot API
+requests==2.31.0
+
+# Environment Configuration
+python-dotenv==1.0.1
+
+# Data Validation
+pydantic>=2.0.0,<3.0.0
