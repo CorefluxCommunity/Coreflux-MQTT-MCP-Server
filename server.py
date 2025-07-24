@@ -948,10 +948,10 @@ def request_lot_code(ctx: Context, query: str, context: str = "") -> str:
     # Log function call (API key will be automatically redacted)
     log_function_call("request_lot_code", query=query, context=context, api_key=api_key)
     
-    # DigitalOcean Agent Platform API endpoint
+    # Coreflux Copilot API endpoint
     api_url = "https://xtov5ljwjkydusw2zpus4yxe.agents.do-ai.run/api/v1/chat/completions"
-    
-    # Create payload for DigitalOcean Agent Platform
+
+    # Create payload for Coreflux Copilot
     # The Coreflux Copilot expects a specific chat completion format
     try:
         # Build the user message content
@@ -1066,7 +1066,7 @@ def process_do_agent_response(response_text):
 
 def format_do_agent_output(result):
     """
-    Format the DigitalOcean Agent Platform response for better readability.
+    Format the Coreflux Copilot response for better readability.
     
     Args:
         result: The parsed result object from the chat completion API
