@@ -572,6 +572,69 @@ result = await request_lot_code(
 
 **Prerequisites**: Requires `DO_AGENT_API_KEY` environment variable to be configured.
 
+### LOT Code Verification
+
+#### `verify_lot_snippet`
+**Description**: Send a LOT code snippet to an API endpoint for verification and feedback. Validates syntax, checks for best practices, and provides suggestions for improvement.
+
+**Parameters**:
+- `lot_code` (string): The LOT code snippet to verify
+- `description` (string, optional): Description of what the code is supposed to do
+
+**Example Usage**:
+```python
+# Verify a simple action
+lot_code = """
+DEFINE ACTION TurnLampOff
+DO
+    PUBLISH TOPIC "Coreflux/Porto/MeetingRoom/Light1/command/switch:0" WITH "off"
+DESCRIPTION "Turns a specific topic off"
+"""
+result = await verify_lot_snippet(
+    lot_code=lot_code,
+    description="Simple lamp control action"
+)
+
+# Verify a complex model with error checking
+lot_code = """
+DEFINE MODEL EnergyMonitor WITH TOPIC "energy/costs/+"
+    ADD "power_reading" WITH TOPIC "sensors/power/+" AS TRIGGER
+    ADD "rate_per_kwh" WITH 0.12
+    ADD "daily_cost" WITH (power_reading * rate_per_kwh * 24)
+"""
+result = await verify_lot_snippet(
+    lot_code=lot_code,
+    description="Energy cost calculation model"
+)
+```
+
+**Returns**: Formatted verification response containing:
+- ✅/❌ Validation status
+- 🚨 **Errors**: Syntax errors and critical issues
+- ⚠️ **Warnings**: Potential problems and style issues  
+- 💡 **Suggestions**: Recommendations for improvement
+- 📊 **Complexity Analysis**: Code complexity metrics
+- ✨ **Best Practices**: Feedback on coding standards
+
+**Use Cases**:
+- Validate LOT syntax before deployment
+- Get suggestions for code improvement
+- Learn best practices for LOT development
+- Debug complex LOT expressions
+- Code quality assurance
+
+**Configuration**: 
+- API endpoint configurable via `LOT_VERIFIER_API_URL` environment variable
+- Default: `http://localhost:8000/validate/code`
+- Command line: `--lot-verifier-api-url`
+
+**API Format**: 
+- Sends JSON payload: `{"code": "LOT_CODE", "filename": "DESCRIPTION.lot"}`
+- Content-Type: `application/json`
+- Expects JSON response with verification results
+
+**Note**: Default endpoint assumes a local validation service running on localhost:8000.
+
 ---
 
 ## Dynamic Action Tools

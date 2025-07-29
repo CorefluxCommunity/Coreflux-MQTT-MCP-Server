@@ -258,6 +258,8 @@ def parse_args():
                       help="Path to client key file for TLS")
     parser.add_argument("--do-agent-api-key", default=os.environ.get("DO_AGENT_API_KEY"),
                       help="DigitalOcean Agent Platform API key")
+    parser.add_argument("--lot-verifier-api-url", default=os.environ.get("LOT_VERIFIER_API_URL", "http://localhost:8000/validate/code"),
+                      help="LOT code verification API endpoint URL")
     parser.add_argument("--log-level", default=os.environ.get("LOG_LEVEL", "INFO"),
                       choices=["NONE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                       help="Set logging level (NONE disables all logging)")
@@ -811,38 +813,38 @@ async def run_action(action_name: str, ctx: Context) -> str:
         return f"ERROR: Output is not a string: {e}"
     return result
 
-@mcp.tool()
-async def remove_all_models(ctx: Context) -> str:
-    """Remove all models from Coreflux"""
-    logger.warning("Removing ALL models - this is a destructive operation")
-    result = execute_command("-removeAllModels")
-    try:
-        StringModel(value=result)
-    except Exception as e:
-        return f"ERROR: Output is not a string: {e}"
-    return result
+# @mcp.tool()
+# async def remove_all_models(ctx: Context) -> str:
+#     """Remove all models from Coreflux"""
+#     logger.warning("Removing ALL models - this is a destructive operation")
+#     result = execute_command("-removeAllModels")
+#     try:
+#         StringModel(value=result)
+#     except Exception as e:
+#         return f"ERROR: Output is not a string: {e}"
+#     return result
 
-@mcp.tool()
-async def remove_all_actions(ctx: Context) -> str:
-    """Remove all actions from Coreflux"""
-    logger.warning("Removing ALL actions - this is a destructive operation")
-    result = execute_command("-removeAllActions")
-    try:
-        StringModel(value=result)
-    except Exception as e:
-        return f"ERROR: Output is not a string: {e}"
-    return result
+# @mcp.tool()
+# async def remove_all_actions(ctx: Context) -> str:
+#     """Remove all actions from Coreflux"""
+#     logger.warning("Removing ALL actions - this is a destructive operation")
+#     result = execute_command("-removeAllActions")
+#     try:
+#         StringModel(value=result)
+#     except Exception as e:
+#         return f"ERROR: Output is not a string: {e}"
+#     return result
 
-@mcp.tool()
-async def remove_all_routes(ctx: Context) -> str:
-    """Remove all routes from Coreflux"""
-    logger.warning("Removing ALL routes - this is a destructive operation")
-    result = execute_command("-removeAllRoutes")
-    try:
-        StringModel(value=result)
-    except Exception as e:
-        return f"ERROR: Output is not a string: {e}"
-    return result
+# @mcp.tool()
+# async def remove_all_routes(ctx: Context) -> str:
+#     """Remove all routes from Coreflux"""
+#     logger.warning("Removing ALL routes - this is a destructive operation")
+#     result = execute_command("-removeAllRoutes")
+#     try:
+#         StringModel(value=result)
+#     except Exception as e:
+#         return f"ERROR: Output is not a string: {e}"
+#     return result
 
 @mcp.tool()
 async def lot_diagnostic(diagnostic_value: str, ctx: Context) -> str:
@@ -1163,6 +1165,287 @@ def format_do_agent_output(result):
         return json.dumps(result, indent=2)
         
     # Join all parts with newlines and return
+    return "\n".join(output).strip()
+
+@mcp.tool()
+async def verify_lot_snippet(lot_code: str, description: str = "", ctx: Context = None) -> str:
+    """
+    Send a LOT code snippet to an API endpoint for verification and feedback.
+    
+    This function validates LOT syntax, checks for best practices, and provides
+    suggestions for improvement through an external verification service.
+    
+    Args:
+        lot_code: The LOT code snippet to verify
+        description: Optional description of what the code is supposed to do
+        
+    Returns:
+        A formatted string containing verification results and feedback
+    """
+    try:
+        StringModel(value=lot_code)
+        StringModel(value=description)
+    except Exception as e:
+        return f"ERROR: lot_code/description must be a string: {e}"
+    
+    # Log function call (no sensitive data in LOT verification)
+    log_function_call("verify_lot_snippet", lot_code=lot_code[:50] + "..." if len(lot_code) > 50 else lot_code, description=description)
+    
+    # Get API endpoint from configuration (configurable for different environments)
+    api_url = args.lot_verifier_api_url
+    
+    # Build the verification payload
+    try:
+        # Create JSON payload with code and filename fields
+        payload = {
+            "code": lot_code,
+            "filename": f"{description}.lot" if description else "snippet.lot"
+        }
+        
+        safe_log(logger.debug, f"Sending LOT verification request with code length: {len(lot_code)} characters")
+        safe_log(logger.info, f"Verifying LOT snippet: {description[:30]}..." if description and len(description) > 30 else f"Verifying LOT snippet")
+        
+    except Exception as e:
+        error_msg = f"Failed to create verification payload: {str(e)}"
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
+    
+    try:
+        # Set headers for the verification API
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "CorefluxMCP/1.0"
+        }
+        
+        # Make the API request
+        response = requests.post(api_url, json=payload, headers=headers, timeout=15)
+        
+        # Debug the response
+        safe_log(logger.debug, f"LOT verification API response status: {response.status_code}")
+        safe_log(logger.debug, f"LOT verification API response: {response.text[:200]}..." if len(response.text) > 200 else response.text)
+        
+        if response.status_code == 200:
+            # Process successful verification response
+            result = process_lot_verification_response(response.text)
+            try:
+                StringModel(value=result)
+            except Exception as e:
+                return f"ERROR: Output is not a string: {e}"
+            return result
+        elif response.status_code == 400:
+            # Bad request - likely syntax error in LOT code
+            try:
+                error_data = json.loads(response.text)
+                error_msg = error_data.get("message", "Invalid LOT syntax")
+                logger.warning(f"LOT verification failed: {error_msg}")
+                return f"LOT Verification Failed: {error_msg}"
+            except json.JSONDecodeError:
+                return f"LOT Verification Failed: Invalid request (status 400)"
+        else:
+            # Handle other error status codes
+            error_msg = f"LOT verification API returned status {response.status_code}: {response.text}"
+            logger.error(error_msg)
+            return f"Error: {error_msg}"
+            
+    except requests.exceptions.Timeout:
+        error_msg = "LOT verification request timed out after 15 seconds"
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
+    except requests.exceptions.ConnectionError:
+        error_msg = "Connection error occurred when accessing LOT verification API"
+        logger.error(error_msg)
+        return f"Error: {error_msg}. Note: This is a temporary API endpoint that may not be available yet."
+    except Exception as e:
+        error_msg = f"Error making LOT verification request: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return f"Error: {error_msg}"
+
+def process_lot_verification_response(response_text):
+    """
+    Process the response from the LOT verification API.
+    
+    Args:
+        response_text: The raw API response text
+        
+    Returns:
+        A formatted string with verification results and feedback
+    """
+    if not response_text or not response_text.strip():
+        error_msg = "Empty verification response"
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
+    
+    # Normalize the response text
+    cleaned_text = response_text.strip()
+    
+    try:
+        # Parse the verification response as JSON
+        result = json.loads(cleaned_text)
+        
+        logger.info("LOT verification completed successfully")
+        
+        # Format the verification results for output
+        formatted_result = format_lot_verification_output(result)
+        try:
+            StringModel(value=formatted_result)
+        except Exception as e:
+            return f"ERROR: Output is not a string: {e}"
+        return formatted_result
+        
+    except json.JSONDecodeError as e:
+        # If it's not JSON, treat it as plain text response
+        logger.warning(f"Received non-JSON response from LOT verification API")
+        return cleaned_text
+        
+    except Exception as e:
+        error_msg = f"Error processing LOT verification response: {str(e)}"
+        logger.error(error_msg)
+        safe_log(logger.debug, f"Problematic verification response: {cleaned_text[:500]}...")
+        return f"Error: {error_msg}"
+
+def format_lot_verification_output(result):
+    """
+    Format the LOT verification response for better readability.
+    
+    Args:
+        result: The parsed verification result object
+        
+    Returns:
+        A formatted string with verification results and feedback
+    """
+    # If it's a string, return it directly
+    if isinstance(result, str):
+        return result
+    
+    # If it's not a dict, convert to string
+    if not isinstance(result, dict):
+        return str(result)
+    
+    # Initialize output array
+    output = []
+    
+    # Helper function for safe dictionary access
+    def safe_get(obj, key, default=""):
+        """Safely get a value from a dictionary"""
+        if isinstance(obj, dict) and key in obj:
+            value = obj[key]
+            return value if value is not None else default
+        return default
+    
+    # Extract verification status
+    status = safe_get(result, "status")
+    is_valid = safe_get(result, "valid")
+    
+    # Add status header
+    if status:
+        if is_valid:
+            output.append(f"✅ LOT Verification Status: {status}")
+        else:
+            output.append(f"❌ LOT Verification Status: {status}")
+    elif is_valid is not None:
+        if is_valid:
+            output.append("✅ LOT Code is Valid")
+        else:
+            output.append("❌ LOT Code has Issues")
+    
+    output.append("")
+    
+    # Extract and display errors
+    errors = safe_get(result, "errors")
+    if errors:
+        output.append("## 🚨 Errors Found:")
+        if isinstance(errors, list):
+            for error in errors:
+                if isinstance(error, dict):
+                    line = error.get("line", "")
+                    message = error.get("message", str(error))
+                    if line:
+                        output.append(f"- Line {line}: {message}")
+                    else:
+                        output.append(f"- {message}")
+                else:
+                    output.append(f"- {error}")
+        else:
+            output.append(f"- {errors}")
+        output.append("")
+    
+    # Extract and display warnings
+    warnings = safe_get(result, "warnings")
+    if warnings:
+        output.append("## ⚠️ Warnings:")
+        if isinstance(warnings, list):
+            for warning in warnings:
+                if isinstance(warning, dict):
+                    message = warning.get("message", str(warning))
+                    output.append(f"- {message}")
+                else:
+                    output.append(f"- {warning}")
+        else:
+            output.append(f"- {warnings}")
+        output.append("")
+    
+    # Extract and display suggestions
+    suggestions = safe_get(result, "suggestions")
+    if suggestions:
+        output.append("## 💡 Suggestions for Improvement:")
+        if isinstance(suggestions, list):
+            for suggestion in suggestions:
+                if isinstance(suggestion, dict):
+                    category = suggestion.get("category", "")
+                    message = suggestion.get("message", str(suggestion))
+                    if category:
+                        output.append(f"- **{category}**: {message}")
+                    else:
+                        output.append(f"- {message}")
+                else:
+                    output.append(f"- {suggestion}")
+        else:
+            output.append(f"- {suggestions}")
+        output.append("")
+    
+    # Extract complexity analysis
+    complexity = safe_get(result, "complexity")
+    if complexity:
+        output.append("## 📊 Complexity Analysis:")
+        if isinstance(complexity, dict):
+            score = complexity.get("score", "")
+            level = complexity.get("level", "")
+            comments = complexity.get("comments", "")
+            
+            if score:
+                output.append(f"- Complexity Score: {score}")
+            if level:
+                output.append(f"- Complexity Level: {level}")
+            if comments:
+                output.append(f"- Comments: {comments}")
+        else:
+            output.append(f"- {complexity}")
+        output.append("")
+    
+    # Extract best practices feedback
+    best_practices = safe_get(result, "best_practices")
+    if best_practices:
+        output.append("## ✨ Best Practices Feedback:")
+        if isinstance(best_practices, list):
+            for practice in best_practices:
+                output.append(f"- {practice}")
+        else:
+            output.append(f"- {best_practices}")
+        output.append("")
+    
+    # Extract any general feedback
+    feedback = safe_get(result, "feedback")
+    if feedback and feedback not in [suggestions, best_practices]:
+        output.append("## 📝 Additional Feedback:")
+        output.append(feedback)
+        output.append("")
+    
+    # If we didn't extract any meaningful data, return the raw object
+    if len(output) <= 2:  # Only status header and empty line
+        return json.dumps(result, indent=2)
+        
+    # Join all parts and return
     return "\n".join(output).strip()
 
 # endregion
@@ -1819,217 +2102,217 @@ async def mqtt_monitor_topic(topic: str, qos: int = 0, ctx: Context = None) -> s
 
 # endregion
 
-@mcp.tool()
-async def comprehensive_health_check(ctx: Context) -> str:
-    """
-    Perform a comprehensive health check of the Coreflux MCP Server
+# @mcp.tool()
+# async def comprehensive_health_check(ctx: Context) -> str:
+#     """
+#     Perform a comprehensive health check of the Coreflux MCP Server
     
-    Checks:
-    - Configuration validation
-    - MQTT connection status
-    - Message processing status
-    - Log system status
-    - System resources
-    - Recent errors
+#     Checks:
+#     - Configuration validation
+#     - MQTT connection status
+#     - Message processing status
+#     - Log system status
+#     - System resources
+#     - Recent errors
     
-    Returns:
-        A detailed health report with status and recommendations
-    """
-    health_report = {
-        "timestamp": datetime.now().isoformat(),
-        "overall_status": "unknown",
-        "checks": {},
-        "recommendations": [],
-        "statistics": {}
-    }
+#     Returns:
+#         A detailed health report with status and recommendations
+#     """
+#     health_report = {
+#         "timestamp": datetime.now().isoformat(),
+#         "overall_status": "unknown",
+#         "checks": {},
+#         "recommendations": [],
+#         "statistics": {}
+#     }
     
-    all_checks_passed = True
+#     all_checks_passed = True
     
-    try:
-        # 1. Configuration Check
-        logger.info("Running comprehensive health check...")
-        config_validator = ConfigurationValidator(logger)
-        is_valid, errors, warnings = config_validator.validate_environment()
+#     try:
+#         # 1. Configuration Check
+#         logger.info("Running comprehensive health check...")
+#         config_validator = ConfigurationValidator(logger)
+#         is_valid, errors, warnings = config_validator.validate_environment()
         
-        health_report["checks"]["configuration"] = {
-            "status": "pass" if is_valid else "fail",
-            "errors": errors,
-            "warnings": warnings
-        }
+#         health_report["checks"]["configuration"] = {
+#             "status": "pass" if is_valid else "fail",
+#             "errors": errors,
+#             "warnings": warnings
+#         }
         
-        if not is_valid:
-            all_checks_passed = False
-            health_report["recommendations"].append("Fix configuration errors before deployment")
+#         if not is_valid:
+#             all_checks_passed = False
+#             health_report["recommendations"].append("Fix configuration errors before deployment")
         
-        # 2. MQTT Connection Check
-        mqtt_status = "connected" if connection_status["connected"] else "disconnected"
-        health_report["checks"]["mqtt_connection"] = {
-            "status": mqtt_status,
-            "details": {
-                "connected": connection_status["connected"],
-                "last_connection_attempt": connection_status.get("last_connection_attempt"),
-                "reconnect_count": connection_status.get("reconnect_count", 0),
-                "last_error": connection_status.get("last_error")
-            }
-        }
+#         # 2. MQTT Connection Check
+#         mqtt_status = "connected" if connection_status["connected"] else "disconnected"
+#         health_report["checks"]["mqtt_connection"] = {
+#             "status": mqtt_status,
+#             "details": {
+#                 "connected": connection_status["connected"],
+#                 "last_connection_attempt": connection_status.get("last_connection_attempt"),
+#                 "reconnect_count": connection_status.get("reconnect_count", 0),
+#                 "last_error": connection_status.get("last_error")
+#             }
+#         }
         
-        if not connection_status["connected"]:
-            health_report["recommendations"].append("Establish MQTT connection using mqtt_connect tool")
+#         if not connection_status["connected"]:
+#             health_report["recommendations"].append("Establish MQTT connection using mqtt_connect tool")
         
-        # 3. Message Processing Check
-        if message_processor:
-            proc_stats = message_processor.get_statistics()
-            health_report["checks"]["message_processing"] = {
-                "status": "active" if message_processor.processing_active else "inactive",
-                "statistics": proc_stats
-            }
+#         # 3. Message Processing Check
+#         if message_processor:
+#             proc_stats = message_processor.get_statistics()
+#             health_report["checks"]["message_processing"] = {
+#                 "status": "active" if message_processor.processing_active else "inactive",
+#                 "statistics": proc_stats
+#             }
             
-            # Check processing rate
-            if proc_stats.get("processing_rate", 0) == 0 and proc_stats.get("messages_received", 0) > 0:
-                all_checks_passed = False
-                health_report["recommendations"].append("Message processing appears stalled")
-        else:
-            health_report["checks"]["message_processing"] = {
-                "status": "not_initialized",
-                "error": "Message processor not available"
-            }
-            all_checks_passed = False
+#             # Check processing rate
+#             if proc_stats.get("processing_rate", 0) == 0 and proc_stats.get("messages_received", 0) > 0:
+#                 all_checks_passed = False
+#                 health_report["recommendations"].append("Message processing appears stalled")
+#         else:
+#             health_report["checks"]["message_processing"] = {
+#                 "status": "not_initialized",
+#                 "error": "Message processor not available"
+#             }
+#             all_checks_passed = False
         
-        # 4. Log System Check
-        try:
-            log_manager = get_log_manager()
-            log_stats = log_manager.get_log_stats()
-            health_report["checks"]["logging"] = {
-                "status": "active",
-                "statistics": log_stats
-            }
+#         # 4. Log System Check
+#         try:
+#             log_manager = get_log_manager()
+#             log_stats = log_manager.get_log_stats()
+#             health_report["checks"]["logging"] = {
+#                 "status": "active",
+#                 "statistics": log_stats
+#             }
             
-            # Check log file sizes
-            total_size_mb = log_stats.get("total_size_bytes", 0) / (1024 * 1024)
-            if total_size_mb > 100:  # More than 100MB
-                health_report["recommendations"].append(f"Log files are large ({total_size_mb:.1f}MB), consider cleanup")
+#             # Check log file sizes
+#             total_size_mb = log_stats.get("total_size_bytes", 0) / (1024 * 1024)
+#             if total_size_mb > 100:  # More than 100MB
+#                 health_report["recommendations"].append(f"Log files are large ({total_size_mb:.1f}MB), consider cleanup")
                 
-        except Exception as e:
-            health_report["checks"]["logging"] = {
-                "status": "error",
-                "error": str(e)
-            }
+#         except Exception as e:
+#             health_report["checks"]["logging"] = {
+#                 "status": "error",
+#                 "error": str(e)
+#             }
         
-        # 5. Server Uptime and Statistics
-        uptime = datetime.now() - server_start_time
-        health_report["statistics"]["uptime"] = {
-            "seconds": int(uptime.total_seconds()),
-            "human_readable": str(uptime),
-            "start_time": server_start_time.isoformat()
-        }
+#         # 5. Server Uptime and Statistics
+#         uptime = datetime.now() - server_start_time
+#         health_report["statistics"]["uptime"] = {
+#             "seconds": int(uptime.total_seconds()),
+#             "human_readable": str(uptime),
+#             "start_time": server_start_time.isoformat()
+#         }
         
-        # 6. Discovery Statistics
-        health_report["statistics"]["discovery"] = {
-            "discovered_actions": len(discovered_actions),
-            "registered_dynamic_tools": len(registered_dynamic_tools),
-            "active_subscriptions": len(mqtt_subscriptions)
-        }
+#         # 6. Discovery Statistics
+#         health_report["statistics"]["discovery"] = {
+#             "discovered_actions": len(discovered_actions),
+#             "registered_dynamic_tools": len(registered_dynamic_tools),
+#             "active_subscriptions": len(mqtt_subscriptions)
+#         }
         
-        # 7. Memory Usage (simple check)
-        import sys
-        try:
-            if hasattr(sys, 'getsizeof'):
-                buffer_size = sys.getsizeof(mqtt_message_buffer)
-                health_report["statistics"]["memory"] = {
-                    "message_buffer_bytes": buffer_size,
-                    "topics_in_buffer": len(mqtt_message_buffer)
-                }
+#         # 7. Memory Usage (simple check)
+#         import sys
+#         try:
+#             if hasattr(sys, 'getsizeof'):
+#                 buffer_size = sys.getsizeof(mqtt_message_buffer)
+#                 health_report["statistics"]["memory"] = {
+#                     "message_buffer_bytes": buffer_size,
+#                     "topics_in_buffer": len(mqtt_message_buffer)
+#                 }
                 
-                if buffer_size > 10 * 1024 * 1024:  # More than 10MB
-                    health_report["recommendations"].append("Message buffer is large, consider clearing old messages")
-        except Exception:
-            pass
+#                 if buffer_size > 10 * 1024 * 1024:  # More than 10MB
+#                     health_report["recommendations"].append("Message buffer is large, consider clearing old messages")
+#         except Exception:
+#             pass
         
-        # 8. Recent Errors Check
-        if connection_status.get("last_error"):
-            health_report["checks"]["recent_errors"] = {
-                "status": "warning",
-                "last_error": connection_status["last_error"]
-            }
-            health_report["recommendations"].append("Check recent error: " + str(connection_status["last_error"]))
-        else:
-            health_report["checks"]["recent_errors"] = {
-                "status": "clean"
-            }
+#         # 8. Recent Errors Check
+#         if connection_status.get("last_error"):
+#             health_report["checks"]["recent_errors"] = {
+#                 "status": "warning",
+#                 "last_error": connection_status["last_error"]
+#             }
+#             health_report["recommendations"].append("Check recent error: " + str(connection_status["last_error"]))
+#         else:
+#             health_report["checks"]["recent_errors"] = {
+#                 "status": "clean"
+#             }
         
-        # 9. API Integration Check
-        if os.environ.get('DO_AGENT_API_KEY'):
-            health_report["checks"]["api_integration"] = {
-                "status": "configured",
-                "note": "API key is configured"
-            }
-        else:
-            health_report["checks"]["api_integration"] = {
-                "status": "not_configured",
-                "note": "DO_AGENT_API_KEY not set"
-            }
-            health_report["recommendations"].append("Configure DO_AGENT_API_KEY for LOT code generation")
+#         # 9. API Integration Check
+#         if os.environ.get('DO_AGENT_API_KEY'):
+#             health_report["checks"]["api_integration"] = {
+#                 "status": "configured",
+#                 "note": "API key is configured"
+#             }
+#         else:
+#             health_report["checks"]["api_integration"] = {
+#                 "status": "not_configured",
+#                 "note": "DO_AGENT_API_KEY not set"
+#             }
+#             health_report["recommendations"].append("Configure DO_AGENT_API_KEY for LOT code generation")
         
-        # Overall Status
-        if all_checks_passed and connection_status["connected"]:
-            health_report["overall_status"] = "healthy"
-        elif connection_status["connected"]:
-            health_report["overall_status"] = "degraded"
-        else:
-            health_report["overall_status"] = "unhealthy"
+#         # Overall Status
+#         if all_checks_passed and connection_status["connected"]:
+#             health_report["overall_status"] = "healthy"
+#         elif connection_status["connected"]:
+#             health_report["overall_status"] = "degraded"
+#         else:
+#             health_report["overall_status"] = "unhealthy"
         
-        # Format the response
-        status_emoji = {
-            "healthy": "✅",
-            "degraded": "⚠️",
-            "unhealthy": "❌"
-        }
+#         # Format the response
+#         status_emoji = {
+#             "healthy": "✅",
+#             "degraded": "⚠️",
+#             "unhealthy": "❌"
+#         }
         
-        result = f"{status_emoji[health_report['overall_status']]} **Coreflux MCP Server Health Check**\n\n"
-        result += f"**Overall Status:** {health_report['overall_status'].upper()}\n"
-        result += f"**Check Time:** {health_report['timestamp']}\n\n"
+#         result = f"{status_emoji[health_report['overall_status']]} **Coreflux MCP Server Health Check**\n\n"
+#         result += f"**Overall Status:** {health_report['overall_status'].upper()}\n"
+#         result += f"**Check Time:** {health_report['timestamp']}\n\n"
         
-        # Individual Checks
-        result += "**Component Status:**\n"
-        for check_name, check_data in health_report["checks"].items():
-            status = check_data.get("status", "unknown")
-            emoji = "✅" if status in ["pass", "active", "connected", "clean", "configured"] else \
-                   "⚠️" if status in ["warning", "degraded", "not_configured"] else "❌"
-            result += f"- {emoji} {check_name.replace('_', ' ').title()}: {status}\n"
+#         # Individual Checks
+#         result += "**Component Status:**\n"
+#         for check_name, check_data in health_report["checks"].items():
+#             status = check_data.get("status", "unknown")
+#             emoji = "✅" if status in ["pass", "active", "connected", "clean", "configured"] else \
+#                    "⚠️" if status in ["warning", "degraded", "not_configured"] else "❌"
+#             result += f"- {emoji} {check_name.replace('_', ' ').title()}: {status}\n"
         
-        # Statistics
-        if health_report["statistics"]:
-            result += "\n**Statistics:**\n"
-            uptime_stats = health_report["statistics"].get("uptime", {})
-            if uptime_stats:
-                result += f"- Uptime: {uptime_stats.get('human_readable', 'unknown')}\n"
+#         # Statistics
+#         if health_report["statistics"]:
+#             result += "\n**Statistics:**\n"
+#             uptime_stats = health_report["statistics"].get("uptime", {})
+#             if uptime_stats:
+#                 result += f"- Uptime: {uptime_stats.get('human_readable', 'unknown')}\n"
             
-            discovery_stats = health_report["statistics"].get("discovery", {})
-            if discovery_stats:
-                result += f"- Discovered Actions: {discovery_stats.get('discovered_actions', 0)}\n"
-                result += f"- Active Subscriptions: {discovery_stats.get('active_subscriptions', 0)}\n"
+#             discovery_stats = health_report["statistics"].get("discovery", {})
+#             if discovery_stats:
+#                 result += f"- Discovered Actions: {discovery_stats.get('discovered_actions', 0)}\n"
+#                 result += f"- Active Subscriptions: {discovery_stats.get('active_subscriptions', 0)}\n"
             
-            if message_processor:
-                proc_stats = message_processor.get_statistics()
-                result += f"- Messages Processed: {proc_stats.get('messages_processed', 0)}\n"
-                result += f"- Processing Rate: {proc_stats.get('processing_rate', 0):.2f} msg/sec\n"
+#             if message_processor:
+#                 proc_stats = message_processor.get_statistics()
+#                 result += f"- Messages Processed: {proc_stats.get('messages_processed', 0)}\n"
+#                 result += f"- Processing Rate: {proc_stats.get('processing_rate', 0):.2f} msg/sec\n"
         
-        # Recommendations
-        if health_report["recommendations"]:
-            result += "\n**Recommendations:**\n"
-            for i, rec in enumerate(health_report["recommendations"], 1):
-                result += f"{i}. {rec}\n"
+#         # Recommendations
+#         if health_report["recommendations"]:
+#             result += "\n**Recommendations:**\n"
+#             for i, rec in enumerate(health_report["recommendations"], 1):
+#                 result += f"{i}. {rec}\n"
         
-        if health_report["overall_status"] == "healthy":
-            result += "\n🎉 **All systems operational!**"
+#         if health_report["overall_status"] == "healthy":
+#             result += "\n🎉 **All systems operational!**"
         
-        logger.info(f"Health check completed - Status: {health_report['overall_status']}")
-        return result
+#         logger.info(f"Health check completed - Status: {health_report['overall_status']}")
+#         return result
         
-    except Exception as e:
-        error_msg = f"Error during health check: {str(e)}"
-        logger.error(error_msg)
-        return f"❌ **Health Check Failed**\n\nError: {error_msg}\n\nPlease check server logs for details."
+#     except Exception as e:
+#         error_msg = f"Error during health check: {str(e)}"
+#         logger.error(error_msg)
+#         return f"❌ **Health Check Failed**\n\nError: {error_msg}\n\nPlease check server logs for details."
 
 if __name__ == "__main__":
     try:
