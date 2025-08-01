@@ -1263,7 +1263,8 @@ async def verify_lot_snippet(lot_code: str, description: str = "", ctx: Context 
 
 def process_lot_verification_response(response_text):
     """
-    Process the response from the LOT verification API.
+    Process the response from the LOT verification API. 
+    No comments should be included in the code block / response script section, as these are not valid in LOT.
     
     Args:
         response_text: The raw API response text
