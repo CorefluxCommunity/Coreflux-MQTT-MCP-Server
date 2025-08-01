@@ -13,7 +13,7 @@ An enterprise-grade Model Context Protocol (MCP) server that provides secure, sc
 ### Core Functionality
 - 🔌 **MQTT Integration**: Seamless connection to Coreflux MQTT brokers with full TLS support
 - 🛠️ **Complete Coreflux API**: Full access to models, actions, rules, and routes
-- 🤖 **AI Code Generation**: LOT (Logic Object Tree) code generation via Coreflux Copilot API
+- 🤖 **AI Code Generation**: LOT (Language-of-Things) code generation via Coreflux Copilot API
 - 🔍 **Dynamic Discovery**: Automatic discovery and listing of available actions
 - 🏥 **Health Monitoring**: Comprehensive system health checks and monitoring
 
@@ -419,7 +419,7 @@ The server includes powerful AI assistance through the Coreflux Copilot API:
 
 ### Features
 
-- **LOT Code Generation** - Generate Logic Object Tree code from natural language
+- **LOT Code Generation** - Generate Language-of-Things code from natural language
 - **Automation Assistance** - Get help with Coreflux automation tasks
 - **Best Practices** - Receive guidance on optimal implementations
 - **Troubleshooting** - Get assistance with debugging and optimization
